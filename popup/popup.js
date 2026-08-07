@@ -1,9 +1,23 @@
 // DeveloperTool - Main Popup Controller
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM Elements
+  const openFullTabBtn = document.getElementById('openFullTabBtn');
   const refreshBtn = document.getElementById('refreshBtn');
   const settingsBtn = document.getElementById('settingsBtn');
   const openConfigBtn = document.getElementById('openConfigBtn');
+
+  // Standalone Full Tab Mode Check
+  const urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('standalone') === 'true' || window.innerWidth > 600) {
+    document.body.classList.add('full-tab-mode');
+    if (openFullTabBtn) openFullTabBtn.classList.add('hidden');
+  }
+
+  if (openFullTabBtn) {
+    openFullTabBtn.addEventListener('click', () => {
+      chrome.tabs.create({ url: chrome.runtime.getURL('popup/popup.html?standalone=true') });
+    });
+  }
 
   const platformSwitch = document.getElementById('platformSwitch');
   const jiraTabBtn = document.getElementById('jiraTabBtn');

@@ -116,6 +116,52 @@ body {
   margin-left: 4px;
 }
 
+/* Apple Segmented Control for Platform Switch (Jira / GitHub) */
+.platform-switch {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-surface-hover);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 2px;
+  gap: 2px;
+}
+
+.platform-btn {
+  background: none;
+  border: none;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.platform-btn:hover {
+  color: var(--text-primary);
+}
+
+.platform-btn.active {
+  background: #ffffff;
+  color: var(--apple-blue);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 1px rgba(0, 0, 0, 0.04);
+}
+
+/* Full Tab Mode Styling */
+body.full-tab-mode {
+  width: 100vw;
+  height: 100vh;
+  max-width: 100%;
+}
+
+body.full-tab-mode .app-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.05);
+}
+
 .icon-btn {
   background: var(--bg-surface-hover);
   border: 1px solid var(--border-color);
