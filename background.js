@@ -229,7 +229,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Fetch private/public GitHub PRs using the browser's logged-in GitHub session
-  // Supports github.com and GitHub Enterprise hosts (e.g. github.securian.com)
+  // Supports github.com and GitHub Enterprise hosts (e.g. github.example.com)
   if (message.action === 'FETCH_GITHUB_VIA_SESSION') {
     (async () => {
       try {
