@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "DeveloperTool",
   "version": "1.0.0",
-  "description": "Apple-inspired Jira Developer Tool to track tickets, inspect comments, and flag stale issues requiring action (>24h).",
+  "description": "Apple-inspired Jira & GitHub Developer Tool to track tickets, Pull Requests, comments, and flag stale issues requiring action (>24h).",
   "permissions": [
     "tabs",
     "scripting",
@@ -10,8 +10,14 @@
   ],
   "host_permissions": [
     "https://*/*",
-    "http://*/*"
+    "http://*/*",
+    "https://api.github.com/*",
+    "https://github.com/*"
   ],
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
   "action": {
     "default_popup": "popup/popup.html",
     "default_title": "DeveloperTool",

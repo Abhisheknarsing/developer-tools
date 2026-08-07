@@ -19,18 +19,22 @@
           <span class="version-tag">PRO v1.0</span>
         </div>
       </div>
+
+      <!-- Segmented Platform Switcher (Jira vs GitHub) -->
+      <div id="platformSwitch" class="platform-switch hidden">
+        <button id="jiraTabBtn" class="platform-btn active">Jira</button>
+        <button id="githubTabBtn" class="platform-btn">GitHub</button>
+      </div>
+
       <div class="header-actions">
         <button id="refreshBtn" class="icon-btn" title="Refresh Tickets & Activity">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
         </button>
-        <button id="settingsBtn" class="icon-btn" title="Settings & User Configuration">
+        <button id="settingsBtn" class="icon-btn" title="Open Configuration Webpage">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
     </header>
-
-    <!-- URL Input Section -->
-
 
     <!-- Dashboard Header Stats -->
     <section id="statsSection" class="stats-section hidden">
@@ -65,7 +69,7 @@
       <div class="filter-controls">
         <button id="myTicketsToggleBtn" class="my-tickets-btn active" title="Toggle My Tickets Only">
           <span class="user-icon">👤</span>
-          <span class="toggle-text">My Tickets</span>
+          <span class="toggle-text">My Items</span>
         </button>
         <button id="staleFilterBtn" class="stale-filter-btn" title="Filter tickets needing action (>24h without update)">
           <span class="alert-icon">🚨</span>
@@ -101,19 +105,20 @@
         </div>
         <h2>DeveloperTool Dashboard</h2>
         <p>Track your tickets, inspect comments, and highlight items requiring action (>24h inactive).</p>
+        <button id="openConfigBtn" class="primary-btn" style="margin-top: 14px;">Open Configuration</button>
       </div>
 
       <!-- Loading State -->
       <div id="loadingState" class="state-container hidden">
         <div class="pulse-spinner"></div>
-        <p id="loadingMsg">Navigating to Jira & reading comments...</p>
+        <p id="loadingMsg">Fetching tickets & activity...</p>
       </div>
 
       <!-- Error State -->
       <div id="errorState" class="state-container hidden">
         <div class="error-icon">!</div>
-        <h3 id="errorTitle">Unable to fetch tickets</h3>
-        <p id="errorMsg">Make sure the URL is correct and you are logged into Jira in Chrome.</p>
+        <h3 id="errorTitle">Unable to fetch data</h3>
+        <p id="errorMsg">Make sure your URL is correct in configuration and you are logged in.</p>
         <button id="retryBtn" class="secondary-btn">Try Again</button>
       </div>
 
@@ -127,42 +132,9 @@
       <span id="sourceBadge" class="source-badge"></span>
       <span id="boardTitleLabel" class="board-title-label"></span>
     </footer>
-
-    <!-- Setup / Settings Modal Overlay -->
-    <div id="settingsModal" class="modal-overlay hidden">
-      <div class="modal-card">
-        <div class="modal-header">
-          <h3>DeveloperTool Settings</h3>
-          <button id="closeModalBtn" class="close-modal-btn">&times;</button>
-        </div>
-        <div class="modal-body">
-          <p class="modal-desc">Configure your default Jira Board URL and User Email/Name to fetch and monitor your tickets.</p>
-
-          <div class="form-group">
-            <label for="modalJiraUrl">Default Jira Board URL</label>
-            <input type="text" id="modalJiraUrl" placeholder="https://company.atlassian.net/jira/software/projects/KEY/boards/1" />
-          </div>
-
-          <div class="form-group">
-            <label for="modalUserEmail">Your Email / Username</label>
-            <input type="text" id="modalUserEmail" placeholder="user@company.com or First Last" />
-            <small class="form-help">Used to filter and show tickets assigned to you.</small>
-          </div>
-
-          <div class="form-group checkbox-group">
-            <label class="checkbox-label">
-              <input type="checkbox" id="modalMyTicketsOnly" checked />
-              <span>Fetch only my tickets by default</span>
-            </label>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button id="saveSettingsBtn" class="primary-btn">Save Configuration</button>
-        </div>
-      </div>
-    </div>
   </div>
 
+  <script src="../scripts/github_api.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

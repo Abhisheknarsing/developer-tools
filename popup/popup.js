@@ -1,8 +1,13 @@
-// DeveloperTool - Popup Script
+// DeveloperTool - Main Popup Controller
 document.addEventListener('DOMContentLoaded', async () => {
   // DOM Elements
   const refreshBtn = document.getElementById('refreshBtn');
   const settingsBtn = document.getElementById('settingsBtn');
+  const openConfigBtn = document.getElementById('openConfigBtn');
+
+  const platformSwitch = document.getElementById('platformSwitch');
+  const jiraTabBtn = document.getElementById('jiraTabBtn');
+  const githubTabBtn = document.getElementById('githubTabBtn');
 
   const statsSection = document.getElementById('statsSection');
   const statTotal = document.getElementById('statTotal');
@@ -34,96 +39,130 @@ document.addEventListener('DOMContentLoaded', async () => {
   const sourceBadge = document.getElementById('sourceBadge');
   const boardTitleLabel = document.getElementById('boardTitleLabel');
 
-  const settingsModal = document.getElementById('settingsModal');
-  const closeModalBtn = document.getElementById('closeModalBtn');
-  const modalJiraUrl = document.getElementById('modalJiraUrl');
-  const modalUserEmail = document.getElementById('modalUserEmail');
-  const modalMyTicketsOnly = document.getElementById('modalMyTicketsOnly');
-  const saveSettingsBtn = document.getElementById('saveSettingsBtn');
-
   // State Variables
-  let currentTickets = [];
+  let currentPlatform = 'jira'; // 'jira' | 'github'
+  let jiraTickets = [];
+  let githubTickets = [];
   let activeViewMode = 'board';
+
   let userEmail = '';
   let defaultJiraUrl = '';
+  let githubRepos = [];
+  let githubToken = '';
   let myTicketsOnly = true;
   let staleOnly = false;
   let recent5mOnly = false;
 
-  // Load User Configuration
-  const userConfig = await chrome.storage.local.get(['userEmail', 'defaultJiraUrl', 'myTicketsOnly']);
+  // Load User Configuration from Chrome Local Storage
+  const userConfig = await chrome.storage.local.get([
+    'userEmail',
+    'defaultJiraUrl',
+    'myTicketsOnly',
+    'githubRepos',
+    'githubToken'
+  ]);
+
   if (userConfig.userEmail) userEmail = userConfig.userEmail;
   if (userConfig.defaultJiraUrl) defaultJiraUrl = userConfig.defaultJiraUrl;
   if (typeof userConfig.myTicketsOnly === 'boolean') myTicketsOnly = userConfig.myTicketsOnly;
 
+  if (userConfig.githubRepos) {
+    if (Array.isArray(userConfig.githubRepos)) {
+      githubRepos = userConfig.githubRepos;
+    } else if (typeof userConfig.githubRepos === 'string') {
+      githubRepos = userConfig.githubRepos.split('\n').map((r) => r.trim()).filter(Boolean);
+    }
+  }
+  if (userConfig.githubToken) githubToken = userConfig.githubToken;
+
   updateUserUI();
 
-  // Auto-fetch if URL is configured. If empty, open configuration modal.
-  if (!defaultJiraUrl) {
-    openSettingsModal();
-  } else {
-    triggerOpenAndRead(defaultJiraUrl);
+  // Show platform switcher if GitHub repos are configured
+  if (githubRepos.length > 0) {
+    platformSwitch.classList.remove('hidden');
   }
 
-  // --- Core Ticket Loading Functions ---
-  async function triggerOpenAndRead(targetUrl = defaultJiraUrl) {
-    const rawUrl = targetUrl || defaultJiraUrl;
-    if (!rawUrl) {
-      return; // Do nothing if URL is empty
-    }
+  // Open Options Webpage on Settings Click
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
+  }
+  if (openConfigBtn) {
+    openConfigBtn.addEventListener('click', () => {
+      chrome.runtime.openOptionsPage();
+    });
+  }
 
-    let formattedUrl = rawUrl.trim();
-    if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
-      formattedUrl = 'https://' + formattedUrl;
-    }
+  // Platform Switcher Listeners
+  if (jiraTabBtn) {
+    jiraTabBtn.addEventListener('click', () => {
+      currentPlatform = 'jira';
+      jiraTabBtn.classList.add('active');
+      githubTabBtn.classList.remove('active');
+      renderPlatformData();
+    });
+  }
 
-    showLoading('Reading tickets & comments...');
+  if (githubTabBtn) {
+    githubTabBtn.addEventListener('click', () => {
+      currentPlatform = 'github';
+      githubTabBtn.classList.add('active');
+      jiraTabBtn.classList.remove('active');
+      renderPlatformData();
+    });
+  }
 
+  // If Jira URL is configured, fetch on launch
+  if (defaultJiraUrl) {
+    triggerFetchAllData();
+  } else if (githubRepos.length > 0) {
+    currentPlatform = 'github';
+    if (githubTabBtn) githubTabBtn.click();
+  }
+
+  async function triggerFetchAllData() {
+    showLoading('Fetching tickets & activity...');
     try {
-      const response = await chrome.runtime.sendMessage({
-        action: 'OPEN_AND_READ_BOARD',
-        url: formattedUrl
-      });
-
-      if (response && response.success) {
-        handleTicketsLoaded(response);
-      } else {
-        showError(
-          'Could not read Jira tickets',
-          response ? response.error : 'Make sure you are logged into Jira and the URL is accessible.'
-        );
+      if (defaultJiraUrl) {
+        const resp = await chrome.runtime.sendMessage({
+          action: 'OPEN_AND_READ_BOARD',
+          url: defaultJiraUrl
+        });
+        if (resp && resp.success) {
+          jiraTickets = resp.tickets || [];
+          sourceBadge.innerText = `Source: ${resp.source || 'Jira'}`;
+          boardTitleLabel.innerText = resp.boardTitle || 'Jira Board';
+        }
       }
+
+      if (githubRepos.length > 0 && typeof fetchAllGitHubItems === 'function') {
+        githubTickets = await fetchAllGitHubItems(githubRepos, githubToken);
+      }
+
+      renderPlatformData();
     } catch (err) {
       showError('Execution Error', err.message);
     }
   }
 
-  function handleTicketsLoaded(data) {
-    currentTickets = data.tickets || [];
-    renderStats(currentTickets);
-    renderStatusFilterOptions(currentTickets);
-
-    sourceBadge.innerText = data.source ? `Source: ${data.source}` : 'Source: DOM';
-    boardTitleLabel.innerText = data.boardTitle || 'Jira Board';
-
+  function renderPlatformData() {
+    const tickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
+    renderStats(tickets);
+    renderStatusFilterOptions(tickets);
     renderTickets();
   }
 
-  // --- Settings & Control Event Listeners ---
+  // Refresh Button Listener
   if (refreshBtn) {
-    refreshBtn.addEventListener('click', () => {
-      if (!defaultJiraUrl) {
-        openSettingsModal();
-        return;
-      }
+    refreshBtn.addEventListener('click', async () => {
       refreshBtn.classList.add('spinning');
-      triggerOpenAndRead(defaultJiraUrl);
+      await triggerFetchAllData();
+      refreshBtn.classList.remove('spinning');
     });
   }
 
-  if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
-  if (closeModalBtn) closeModalBtn.addEventListener('click', closeSettingsModal);
-  if (retryBtn) retryBtn.addEventListener('click', () => triggerOpenAndRead(defaultJiraUrl));
+  if (retryBtn) retryBtn.addEventListener('click', triggerFetchAllData);
 
   if (myTicketsToggleBtn) {
     myTicketsToggleBtn.addEventListener('click', async () => {
@@ -148,48 +187,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       recent5mFilterBtn.classList.toggle('active', recent5mOnly);
       renderTickets();
     });
-  }
-
-  if (saveSettingsBtn) {
-    saveSettingsBtn.addEventListener('click', async () => {
-      const urlVal = modalJiraUrl.value.trim();
-      const emailVal = modalUserEmail.value.trim();
-      const myOnlyVal = modalMyTicketsOnly.checked;
-
-      if (!urlVal) {
-        alert('Please enter a default Jira Board URL');
-        return;
-      }
-      if (!emailVal) {
-        alert('Please enter your email or username');
-        return;
-      }
-
-      userEmail = emailVal;
-      defaultJiraUrl = urlVal;
-      myTicketsOnly = myOnlyVal;
-
-      await chrome.storage.local.set({
-        userEmail,
-        defaultJiraUrl,
-        myTicketsOnly
-      });
-
-      updateUserUI();
-      closeSettingsModal();
-      triggerOpenAndRead(defaultJiraUrl);
-    });
-  }
-
-  function openSettingsModal() {
-    if (modalJiraUrl) modalJiraUrl.value = defaultJiraUrl || '';
-    if (modalUserEmail) modalUserEmail.value = userEmail || '';
-    if (modalMyTicketsOnly) modalMyTicketsOnly.checked = myTicketsOnly;
-    if (settingsModal) settingsModal.classList.remove('hidden');
-  }
-
-  function closeSettingsModal() {
-    if (settingsModal) settingsModal.classList.add('hidden');
   }
 
   function updateUserUI() {
@@ -221,10 +218,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (errorMsg) errorMsg.innerText = msg;
     if (errorState) errorState.classList.remove('hidden');
 
-    resetButtonState();
-  }
-
-  function resetButtonState() {
     if (refreshBtn) refreshBtn.classList.remove('spinning');
   }
 
@@ -234,7 +227,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const todoCount = tickets.filter(t => {
       const s = (t.status || '').toLowerCase();
-      return s.includes('to do') || s.includes('backlog') || s.includes('open');
+      return s.includes('to do') || s.includes('backlog') || s.includes('open') || s.includes('draft');
     }).length;
 
     const inProgCount = tickets.filter(t => {
@@ -244,10 +237,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     const doneCount = tickets.filter(t => {
       const s = (t.status || '').toLowerCase();
-      return s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('complete');
+      return s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('complete') || s.includes('merged');
     }).length;
 
-    const actionNeededCount = tickets.filter(t => t.actionRequired).length;
+    // RULE: Exclude Done/Closed/Merged items from Action Needed metrics!
+    const actionNeededCount = tickets.filter(t => {
+      const s = (t.status || '').toLowerCase();
+      const isDone = s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('merged');
+      return !isDone && t.actionRequired;
+    }).length;
 
     if (statTotal) statTotal.innerText = total;
     if (statTodo) statTodo.innerText = todoCount;
@@ -323,10 +321,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function getFilteredTickets() {
+    const activeTickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
     const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
     const statusVal = statusFilterSelect ? statusFilterSelect.value : 'ALL';
 
-    return currentTickets.filter((t) => {
+    return activeTickets.filter((t) => {
       const matchesSearch =
         !query ||
         t.key.toLowerCase().includes(query) ||
@@ -338,7 +337,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const matchesUser = !myTicketsOnly || !userEmail || matchesUserAssignee(t, userEmail);
 
-      const matchesStale = !staleOnly || t.actionRequired;
+      const s = (t.status || '').toLowerCase();
+      const isDone = s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('merged');
+
+      // Rule: Done tickets NEVER match stale filter!
+      const matchesStale = !staleOnly || (!isDone && t.actionRequired);
 
       const matchesRecent5m = !recent5mOnly || (typeof t.minutesSinceUpdate === 'number' && t.minutesSinceUpdate <= 5);
 
@@ -347,10 +350,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function renderTickets() {
-    resetButtonState();
     if (loadingState) loadingState.classList.add('hidden');
     if (welcomeState) welcomeState.classList.add('hidden');
     if (errorState) errorState.classList.add('hidden');
+    if (refreshBtn) refreshBtn.classList.remove('spinning');
 
     const filtered = getFilteredTickets();
 
@@ -359,7 +362,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (filtered.length === 0) {
       ticketsContainer.innerHTML = `
         <div class="state-container">
-          <p>No tickets matched your filter or search query.</p>
+          <p>No items matched your filter or search query.</p>
         </div>
       `;
       ticketsContainer.classList.remove('hidden');
@@ -377,9 +380,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function getStatusClass(status) {
     const s = (status || '').toLowerCase();
-    if (s.includes('done') || s.includes('closed') || s.includes('resolved')) return 'done';
+    if (s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('merged')) return 'done';
     if (s.includes('review') || s.includes('qa')) return 'in-review';
-    if (s.includes('progress') || s.includes('dev')) return 'in-progress';
+    if (s.includes('progress') || s.includes('dev') || s.includes('open')) return 'in-progress';
     return 'todo';
   }
 
@@ -400,8 +403,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     const statusClass = getStatusClass(ticket.status);
     const priorityClass = getPriorityClass(ticket.priority);
 
+    // Stale action required alert badge (Only for active non-done items!)
     let actionBadgeHtml = '';
-    if (ticket.actionRequired) {
+    const s = (ticket.status || '').toLowerCase();
+    const isDone = s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('merged');
+
+    if (ticket.actionRequired && !isDone) {
       actionBadgeHtml = `
         <div class="action-required-badge">
           <span>🚨 Action Required</span>
@@ -426,7 +433,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     card.innerHTML = `
       ${actionBadgeHtml}
       <div class="ticket-top">
-        <span class="ticket-key">${ticket.key}</span>
+        <span class="ticket-key">${ticket.key} ${ticket.isGitHub ? `(${escapeHtml(ticket.repo)})` : ''}</span>
         <span class="status-badge ${statusClass}">${ticket.status}</span>
       </div>
       <div class="ticket-summary">${escapeHtml(ticket.summary)}</div>
@@ -503,12 +510,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   // --- CSV Export ---
   if (exportBtn) {
     exportBtn.addEventListener('click', () => {
-      if (currentTickets.length === 0) return;
+      const activeTickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
+      if (activeTickets.length === 0) return;
 
       const headers = ['Key', 'Summary', 'Status', 'Priority', 'Assignee', 'Last Comment Author', 'Last Comment Text', 'Action Required', 'URL'];
       const csvRows = [headers.join(',')];
 
-      currentTickets.forEach((t) => {
+      activeTickets.forEach((t) => {
         const row = [
           `"${t.key.replace(/"/g, '""')}"`,
           `"${t.summary.replace(/"/g, '""')}"`,
@@ -526,7 +534,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent(csvRows.join('\n'));
       const link = document.createElement('a');
       link.setAttribute('href', csvContent);
-      link.setAttribute('download', `DeveloperTool_Tickets_${Date.now()}.csv`);
+      link.setAttribute('download', `DeveloperTool_${currentPlatform}_${Date.now()}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);

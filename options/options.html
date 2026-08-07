@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeveloperTool - Configuration</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="options-container">
+    <header class="options-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </div>
+        <div class="brand-text">
+          <h1>DeveloperTool Configuration</h1>
+          <p>Manage your Jira board, GitHub repositories, and user tracking settings</p>
+        </div>
+      </div>
+    </header>
+
+    <main class="options-body">
+      <!-- Jira Configuration -->
+      <section class="card-section">
+        <div class="section-title">
+          <h2>Jira Integration</h2>
+        </div>
+        <div class="form-group">
+          <label for="jiraUrl">Default Jira Board URL</label>
+          <input type="text" id="jiraUrl" placeholder="https://company.atlassian.net/jira/software/projects/KEY/boards/1" />
+          <small class="form-help">Enter your project or sprint board link.</small>
+        </div>
+      </section>
+
+      <!-- User Identification -->
+      <section class="card-section">
+        <div class="section-title">
+          <h2>User Identification</h2>
+        </div>
+        <div class="form-group">
+          <label for="userEmail">Your Email / Username</label>
+          <input type="text" id="userEmail" placeholder="user@company.com or First Last" />
+          <small class="form-help">Used to filter and show tickets and Pull Requests assigned specifically to you.</small>
+        </div>
+        <div class="form-group checkbox-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="myTicketsOnly" checked />
+            <span>Fetch only my assigned tickets/PRs by default</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- GitHub Configuration -->
+      <section class="card-section">
+        <div class="section-title">
+          <h2>GitHub Integration (Optional)</h2>
+        </div>
+        <p class="section-desc">Paste your GitHub project or repository URLs below (one repository link per line). Leave blank to disable GitHub features.</p>
+        
+        <div class="form-group">
+          <label for="githubRepos">GitHub Repositories (1 per line)</label>
+          <textarea id="githubRepos" rows="5" placeholder="https://github.com/facebook/react&#10;https://github.com/vercel/next.js&#10;owner/repo-name"></textarea>
+          <small class="form-help">Supported formats: <code>https://github.com/owner/repo</code> or <code>owner/repo</code></small>
+        </div>
+
+        <div class="form-group">
+          <label for="githubToken">GitHub Personal Access Token (Optional)</label>
+          <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
+          <small class="form-help">Required for private repositories or to increase GitHub API rate limits.</small>
+        </div>
+      </section>
+
+      <!-- Save Actions -->
+      <div class="action-footer">
+        <span id="saveStatus" class="save-status hidden">Settings saved successfully!</span>
+        <button id="saveBtn" class="primary-btn">Save Configuration</button>
+      </div>
+    </main>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
