@@ -145,6 +145,30 @@ body {
   line-height: 1.5;
 }
 
+.info-callout {
+  background: rgba(0, 122, 255, 0.06);
+  border: 1px solid rgba(0, 122, 255, 0.18);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  gap: 6px;
+}
+
+.info-callout strong {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.info-callout p {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.info-callout a {
+  color: var(--apple-blue);
+  font-weight: 600;
+}
+
 .form-group {
   display: flex;
   flex-direction: column;

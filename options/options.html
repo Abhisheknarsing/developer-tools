@@ -44,9 +44,9 @@
           <h2>User Identification</h2>
         </div>
         <div class="form-group">
-          <label for="userEmail">Your Email / Username</label>
-          <input type="text" id="userEmail" placeholder="user@company.com or First Last" />
-          <small class="form-help">Used to filter and match tickets & PRs assigned specifically to you.</small>
+          <label for="userEmail">Your Email or Exact Display Name</label>
+          <input type="text" id="userEmail" placeholder="user@company.com or Exact Jira Display Name" />
+          <small class="form-help">For Jira My Items: use your exact work email or the exact display name shown on Jira tickets. Matching is exact (no partial name guesses). If left blank, Jira uses your logged-in session (`currentUser()`).</small>
         </div>
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
@@ -62,6 +62,11 @@
           <h2>GitHub Integration (Optional)</h2>
         </div>
         <p class="section-desc">Paste your GitHub project or repository URLs below (one repository link per line). Leave blank to disable GitHub features.</p>
+
+        <div class="form-group info-callout">
+          <strong>Private repos use your browser login</strong>
+          <p>Stay logged into <a href="https://github.com/login" target="_blank" rel="noopener noreferrer">github.com</a> in Chrome. DeveloperTool reads pull requests with your existing session — same idea as Jira — so private repos you can open in the browser work without a token.</p>
+        </div>
         
         <div class="form-group">
           <label for="githubRepos">GitHub Repositories (1 per line)</label>
@@ -70,9 +75,9 @@
         </div>
 
         <div class="form-group">
-          <label for="githubToken">GitHub Personal Access Token (Optional)</label>
+          <label for="githubToken">GitHub Personal Access Token (Optional fallback)</label>
           <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
-          <small class="form-help">Required for private repositories or to increase GitHub API rate limits.</small>
+          <small class="form-help">Only needed if you are not logged into GitHub in this browser, or for higher API rate limits.</small>
         </div>
       </section>
     </main>

@@ -37,9 +37,131 @@
     return !isDone && hoursAgo >= 24;
   }
 
+  function escapeJqlString(value) {
+    return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  // Exact assignee identity for My Items — never fuzzy name matching
+  function buildAssigneeJqlClauses(userIdentity) {
+    const clauses = [];
+    const identity = (userIdentity || '').trim();
+
+    if (identity) {
+      const escaped = escapeJqlString(identity);
+      clauses.push(`assignee = "${escaped}"`);
+    }
+
+    // Session user is the authoritative match when logged into Jira
+    clauses.push('assignee = currentUser()');
+    return clauses;
+  }
+
+  function extractAssigneeFields(assignee) {
+    if (!assignee) {
+      return {
+        assigneeName: 'Unassigned',
+        assigneeEmail: '',
+        assigneeAccountId: '',
+        assigneeKey: ''
+      };
+    }
+
+    return {
+      assigneeName: assignee.displayName || assignee.name || 'Assigned',
+      // Keep email as real email only — do not fall back to name/key
+      assigneeEmail: assignee.emailAddress || '',
+      assigneeAccountId: assignee.accountId || '',
+      assigneeKey: assignee.name || assignee.key || ''
+    };
+  }
+
+  function mapIssueToTicket(item) {
+    const fields = item.fields || {};
+    const status = fields.status ? fields.status.name : 'In Progress';
+    const assigneeFields = extractAssigneeFields(fields.assignee);
+
+    let lastCommentAuthor = null;
+    let lastCommentText = null;
+    let lastCommentDate = fields.updated || fields.created;
+
+    if (fields.comment && fields.comment.comments && fields.comment.comments.length > 0) {
+      const comments = fields.comment.comments;
+      const lastComment = comments[comments.length - 1];
+      lastCommentAuthor = lastComment.author
+        ? lastComment.author.displayName || lastComment.author.name
+        : 'User';
+      lastCommentText = lastComment.body || '';
+      lastCommentDate = lastComment.updated || lastComment.created || fields.updated;
+    }
+
+    const hoursAgo = calculateHoursAgo(lastCommentDate);
+    const minutesAgo = calculateMinutesAgo(lastCommentDate);
+    const actionRequired = checkIfActionRequired(status, hoursAgo);
+
+    return {
+      key: item.key,
+      summary: fields.summary || item.key,
+      status,
+      priority: fields.priority ? fields.priority.name : 'Medium',
+      assignee: assigneeFields.assigneeName,
+      assigneeEmail: assigneeFields.assigneeEmail,
+      assigneeAccountId: assigneeFields.assigneeAccountId,
+      assigneeKey: assigneeFields.assigneeKey,
+      type: fields.issuetype ? fields.issuetype.name : 'Task',
+      url: `${window.location.origin}/browse/${item.key}`,
+      lastCommentAuthor,
+      lastCommentText,
+      lastCommentDate,
+      hoursSinceUpdate: hoursAgo,
+      minutesSinceUpdate: minutesAgo,
+      actionRequired
+    };
+  }
+
+  // Exact match only: email, display name, accountId, or username/key
+  function matchesExactAssignee(ticket, userIdentity) {
+    const target = (userIdentity || '').trim().toLowerCase();
+    if (!target) return false;
+
+    const email = (ticket.assigneeEmail || '').trim().toLowerCase();
+    const name = (ticket.assignee || '').trim().toLowerCase();
+    const accountId = (ticket.assigneeAccountId || '').trim().toLowerCase();
+    const key = (ticket.assigneeKey || '').trim().toLowerCase();
+
+    if (email && email === target) return true;
+    if (name && name === target) return true;
+    if (accountId && accountId === target) return true;
+    if (key && key === target) return true;
+    return false;
+  }
+
+  async function jiraApiGet(apiUrl) {
+    const resp = await fetch(apiUrl, {
+      headers: { Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    if (!resp.ok) return null;
+    return resp.json();
+  }
+
+  function buildBoardIssueUrl(boardId, assigneeJql) {
+    const base = `${window.location.origin}/rest/agile/1.0/board/${boardId}/issue?maxResults=100&expand=comment`;
+    if (!assigneeJql) return base;
+    return `${base}&jql=${encodeURIComponent(assigneeJql)}`;
+  }
+
+  function buildSearchUrl(projectKey, assigneeJql) {
+    let jql = `project = ${projectKey}`;
+    if (assigneeJql) jql += ` AND ${assigneeJql}`;
+    jql += ' ORDER BY updated DESC';
+    return `${window.location.origin}/rest/api/2/search?jql=${encodeURIComponent(jql)}&maxResults=100&fields=summary,status,priority,assignee,issuetype,comment,updated,created`;
+  }
+
   // PRIMARY METHOD: Fetch Jira REST API using active session cookies
-  async function fetchTicketsFromJiraAPI() {
+  // My Items uses assignee JQL (email / exact name / currentUser) — not fuzzy matching
+  async function fetchTicketsFromJiraAPI(options = {}) {
     try {
+      const myTicketsOnly = !!options.myTicketsOnly;
+      const userIdentity = (options.userIdentity || '').trim();
       const url = window.location.href;
       let boardId = null;
       let projectKey = null;
@@ -50,79 +172,46 @@
       const projMatch = url.match(/projects\/([A-Z0-9_]+)/i) || url.match(/project=([A-Z0-9_]+)/i);
       if (projMatch) projectKey = projMatch[1];
 
-      let apiUrl = '';
-      if (boardId) {
-        apiUrl = `${window.location.origin}/rest/agile/1.0/board/${boardId}/issue?maxResults=100&expand=comment`;
-      } else if (projectKey) {
-        apiUrl = `${window.location.origin}/rest/api/2/search?jql=project=${projectKey}%20ORDER%20BY%20updated%20DESC&maxResults=50&fields=summary,status,priority,assignee,issuetype,comment,updated,created`;
-      } else {
+      if (!boardId && !projectKey) {
         const keyMatch = extractKeyFromText(url);
-        if (keyMatch) {
-          const prefix = keyMatch.split('-')[0];
-          apiUrl = `${window.location.origin}/rest/api/2/search?jql=project=${prefix}&maxResults=50&fields=summary,status,priority,assignee,issuetype,comment,updated,created`;
-        }
+        if (keyMatch) projectKey = keyMatch.split('-')[0];
       }
 
-      if (!apiUrl) return [];
+      if (!boardId && !projectKey) return { tickets: [], assigneeFilterApplied: false };
 
-      const resp = await fetch(apiUrl, {
-        headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }
-      });
+      const attemptAssigneeClauses = myTicketsOnly ? buildAssigneeJqlClauses(userIdentity) : [null];
 
-      if (!resp.ok) return [];
-
-      const data = await resp.json();
-      const issues = data.issues || [];
-
-      return issues.map((item) => {
-        const fields = item.fields || {};
-        const status = fields.status ? fields.status.name : 'In Progress';
-
-        // Extract Assignee Details (Name, Email, Key)
-        let assigneeName = 'Unassigned';
-        let assigneeEmail = '';
-        if (fields.assignee) {
-          assigneeName = fields.assignee.displayName || fields.assignee.name || 'Assigned';
-          assigneeEmail = fields.assignee.emailAddress || fields.assignee.name || fields.assignee.key || '';
+      for (const assigneeJql of attemptAssigneeClauses) {
+        let apiUrl = '';
+        if (boardId) {
+          apiUrl = buildBoardIssueUrl(boardId, assigneeJql);
+        } else {
+          apiUrl = buildSearchUrl(projectKey, assigneeJql);
         }
 
-        // Process comments & timestamps
-        let lastCommentAuthor = null;
-        let lastCommentText = null;
-        let lastCommentDate = fields.updated || fields.created;
+        const data = await jiraApiGet(apiUrl);
+        if (!data) continue;
 
-        if (fields.comment && fields.comment.comments && fields.comment.comments.length > 0) {
-          const comments = fields.comment.comments;
-          const lastComment = comments[comments.length - 1];
-          lastCommentAuthor = lastComment.author ? (lastComment.author.displayName || lastComment.author.name) : 'User';
-          lastCommentText = lastComment.body || '';
-          lastCommentDate = lastComment.updated || lastComment.created || fields.updated;
+        const issues = data.issues || [];
+        const tickets = issues.map(mapIssueToTicket);
+
+        // currentUser()/assignee JQL already filtered — accept even if empty for that clause
+        // but if identity clause returns 0, try next clause (e.g. currentUser)
+        if (myTicketsOnly && assigneeJql && tickets.length === 0 && assigneeJql !== 'assignee = currentUser()') {
+          continue;
         }
-
-        const hoursAgo = calculateHoursAgo(lastCommentDate);
-        const minutesAgo = calculateMinutesAgo(lastCommentDate);
-        const actionRequired = checkIfActionRequired(status, hoursAgo);
 
         return {
-          key: item.key,
-          summary: fields.summary || item.key,
-          status,
-          priority: fields.priority ? fields.priority.name : 'Medium',
-          assignee: assigneeName,
-          assigneeEmail: assigneeEmail,
-          type: fields.issuetype ? fields.issuetype.name : 'Task',
-          url: `${window.location.origin}/browse/${item.key}`,
-          lastCommentAuthor,
-          lastCommentText,
-          lastCommentDate,
-          hoursSinceUpdate: hoursAgo,
-          minutesSinceUpdate: minutesAgo,
-          actionRequired
+          tickets,
+          assigneeFilterApplied: myTicketsOnly && !!assigneeJql,
+          assigneeJql: assigneeJql || ''
         };
-      });
+      }
+
+      return { tickets: [], assigneeFilterApplied: myTicketsOnly, assigneeJql: '' };
     } catch (err) {
       console.warn('[DeveloperTool] API fetch primary error:', err);
-      return [];
+      return { tickets: [], assigneeFilterApplied: false };
     }
   }
 
@@ -170,6 +259,8 @@
           priority,
           assignee,
           assigneeEmail: '',
+          assigneeAccountId: '',
+          assigneeKey: '',
           type,
           url,
           lastCommentAuthor: null,
@@ -245,6 +336,8 @@
         priority,
         assignee,
         assigneeEmail: '',
+        assigneeAccountId: '',
+        assigneeKey: '',
         type,
         url,
         lastCommentAuthor: null,
@@ -274,13 +367,7 @@
 
           const data = await resp.json();
           const fields = data.fields || {};
-
-          let assigneeName = t.assignee;
-          let assigneeEmail = t.assigneeEmail;
-          if (fields.assignee) {
-            assigneeName = fields.assignee.displayName || fields.assignee.name || t.assignee;
-            assigneeEmail = fields.assignee.emailAddress || fields.assignee.name || fields.assignee.key || '';
-          }
+          const assigneeFields = extractAssigneeFields(fields.assignee);
 
           let lastCommentAuthor = null;
           let lastCommentText = null;
@@ -300,8 +387,10 @@
 
           return {
             ...t,
-            assignee: assigneeName,
-            assigneeEmail,
+            assignee: fields.assignee ? assigneeFields.assigneeName : t.assignee,
+            assigneeEmail: assigneeFields.assigneeEmail,
+            assigneeAccountId: assigneeFields.assigneeAccountId,
+            assigneeKey: assigneeFields.assigneeKey,
             lastCommentAuthor,
             lastCommentText,
             lastCommentDate,
@@ -319,21 +408,47 @@
   }
 
   // Combined ticket collector: REST API FIRST, DOM Fallback SECOND
-  async function collectAllTickets() {
-    // 1. PRIMARY: Jira REST API (Cookies)
-    const apiTickets = await fetchTicketsFromJiraAPI();
-    if (apiTickets.length > 0) {
-      return { tickets: apiTickets, source: 'Jira API' };
+  async function collectAllTickets(options = {}) {
+    const myTicketsOnly = !!options.myTicketsOnly;
+    const userIdentity = (options.userIdentity || '').trim();
+
+    // 1. PRIMARY: Jira REST API with assignee JQL filter when My Items is on
+    const apiResult = await fetchTicketsFromJiraAPI(options);
+    if (apiResult.tickets && apiResult.tickets.length > 0) {
+      return {
+        tickets: apiResult.tickets,
+        source: apiResult.assigneeFilterApplied ? 'Jira API (assignee filter)' : 'Jira API',
+        assigneeFilterApplied: !!apiResult.assigneeFilterApplied
+      };
     }
 
-    // 2. FALLBACK: DOM Parsing
+    // If My Items JQL returned zero because you have no assigned tickets, that is a valid result
+    if (myTicketsOnly && apiResult.assigneeFilterApplied) {
+      return {
+        tickets: [],
+        source: 'Jira API (assignee filter)',
+        assigneeFilterApplied: true
+      };
+    }
+
+    // 2. FALLBACK: DOM Parsing + exact identity filter (never fuzzy)
     let domTickets = parseTicketsFromDOM();
     if (domTickets.length > 0) {
       const enriched = await enrichDOMTicketsWithComments(domTickets);
-      return { tickets: enriched, source: 'DOM Fallback' };
+      if (myTicketsOnly) {
+        const filtered = userIdentity
+          ? enriched.filter((t) => matchesExactAssignee(t, userIdentity))
+          : enriched;
+        return {
+          tickets: filtered,
+          source: 'DOM Fallback (exact assignee)',
+          assigneeFilterApplied: !!userIdentity
+        };
+      }
+      return { tickets: enriched, source: 'DOM Fallback', assigneeFilterApplied: false };
     }
 
-    return { tickets: [], source: 'None' };
+    return { tickets: [], source: 'None', assigneeFilterApplied: false };
   }
 
   // Listen for messages from extension popup/background
@@ -341,14 +456,18 @@
     if (message.action === 'SCRAPE_TICKETS') {
       (async () => {
         try {
-          const result = await collectAllTickets();
+          const result = await collectAllTickets({
+            myTicketsOnly: !!message.myTicketsOnly,
+            userIdentity: message.userIdentity || ''
+          });
           const pageTitle = document.title || 'Jira Board';
           sendResponse({
             success: true,
             tickets: result.tickets,
             source: result.source,
             boardTitle: pageTitle,
-            url: window.location.href
+            url: window.location.href,
+            assigneeFilterApplied: !!result.assigneeFilterApplied
           });
         } catch (err) {
           sendResponse({ success: false, error: err.message });

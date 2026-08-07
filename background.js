@@ -36,6 +36,50 @@ async function ensureContentScriptInjected(tabId) {
   }
 }
 
+async function ensureGitHubSessionScriptInjected(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['scripts/github_session.js']
+    });
+  } catch (err) {
+    console.warn('[DeveloperTool SW] GitHub session script inject notice:', err.message);
+  }
+}
+
+async function findOrOpenGitHubTab(preferLogin = false) {
+  const tabs = await chrome.tabs.query({});
+  let targetTab = tabs.find(
+    (t) => t.url && /https?:\/\/(www\.)?github\.com/i.test(t.url) && !/\/login/i.test(t.url)
+  );
+
+  if (!targetTab && preferLogin) {
+    targetTab = tabs.find((t) => t.url && /https?:\/\/(www\.)?github\.com\/login/i.test(t.url));
+  }
+
+  if (!targetTab) {
+    const url = preferLogin ? 'https://github.com/login' : 'https://github.com/';
+    targetTab = await chrome.tabs.create({ url, active: preferLogin });
+    await waitForTabLoad(targetTab.id);
+  } else if (targetTab.status !== 'complete') {
+    await waitForTabLoad(targetTab.id);
+  }
+
+  await new Promise((r) => setTimeout(r, 600));
+  await ensureGitHubSessionScriptInjected(targetTab.id);
+  return targetTab;
+}
+
+async function sendGitHubTabMessage(tabId, message) {
+  try {
+    return await chrome.tabs.sendMessage(tabId, message);
+  } catch (err) {
+    await ensureGitHubSessionScriptInjected(tabId);
+    await new Promise((r) => setTimeout(r, 400));
+    return chrome.tabs.sendMessage(tabId, message);
+  }
+}
+
 // Save board URL to recent search history in chrome.storage.local
 async function saveRecentBoard(url, title = '') {
   try {
@@ -100,13 +144,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
         // Send scrape request
         let scrapeResponse = null;
+        const scrapePayload = {
+          action: 'SCRAPE_TICKETS',
+          myTicketsOnly: !!message.myTicketsOnly,
+          userIdentity: message.userIdentity || ''
+        };
         try {
-          scrapeResponse = await chrome.tabs.sendMessage(targetTab.id, { action: 'SCRAPE_TICKETS' });
+          scrapeResponse = await chrome.tabs.sendMessage(targetTab.id, scrapePayload);
         } catch (err) {
           console.warn('[Jira Board Reader SW] Retrying message after script re-injection:', err);
           await ensureContentScriptInjected(targetTab.id);
           await new Promise((r) => setTimeout(r, 500));
-          scrapeResponse = await chrome.tabs.sendMessage(targetTab.id, { action: 'SCRAPE_TICKETS' });
+          scrapeResponse = await chrome.tabs.sendMessage(targetTab.id, scrapePayload);
         }
 
         if (scrapeResponse && scrapeResponse.success) {
@@ -117,7 +166,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             source: scrapeResponse.source,
             boardTitle: scrapeResponse.boardTitle || targetTab.title,
             tabId: targetTab.id,
-            url: targetUrl
+            url: targetUrl,
+            assigneeFilterApplied: !!scrapeResponse.assigneeFilterApplied
           });
         } else {
           sendResponse({
@@ -157,6 +207,103 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else {
           sendResponse({ success: false, error: 'Not a recognized Jira page or page is loading' });
         }
+      } catch (err) {
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // Fetch private/public GitHub PRs using the browser's logged-in GitHub session
+  if (message.action === 'FETCH_GITHUB_VIA_SESSION') {
+    (async () => {
+      try {
+        const repos = Array.isArray(message.repos) ? message.repos : [];
+        if (repos.length === 0) {
+          sendResponse({ success: true, sessionUser: '', results: [], needsLogin: false });
+          return;
+        }
+
+        let targetTab = await findOrOpenGitHubTab(false);
+        let sessionInfo = await sendGitHubTabMessage(targetTab.id, { action: 'DETECT_GITHUB_SESSION' });
+
+        if (!sessionInfo || !sessionInfo.loggedIn) {
+          // Open login so the user can authenticate with their browser session
+          targetTab = await findOrOpenGitHubTab(true);
+          sessionInfo = await sendGitHubTabMessage(targetTab.id, { action: 'DETECT_GITHUB_SESSION' });
+
+          if (!sessionInfo || !sessionInfo.loggedIn) {
+            sendResponse({
+              success: false,
+              needsLogin: true,
+              sessionUser: '',
+              results: [],
+              error: 'Log into GitHub in your browser, then refresh DeveloperTool. Private repos use your browser session.'
+            });
+            return;
+          }
+        }
+
+        const sessionUser = sessionInfo.sessionUser || '';
+        const results = [];
+
+        for (const repoItem of repos) {
+          const owner = repoItem.owner;
+          const repo = repoItem.repo;
+          if (!owner || !repo) continue;
+
+          const prResponse = await sendGitHubTabMessage(targetTab.id, {
+            action: 'FETCH_GITHUB_REPO_PRS',
+            owner,
+            repo,
+            enrichDetails: message.enrichDetails !== false
+          });
+
+          if (prResponse && prResponse.needsLogin) {
+            sendResponse({
+              success: false,
+              needsLogin: true,
+              sessionUser,
+              results,
+              error: 'GitHub session expired. Log into GitHub in your browser, then refresh.'
+            });
+            return;
+          }
+
+          results.push({
+            owner,
+            repo,
+            error: prResponse && prResponse.error ? prResponse.error : null,
+            pulls: (prResponse && prResponse.pulls) || []
+          });
+        }
+
+        sendResponse({
+          success: true,
+          needsLogin: false,
+          sessionUser,
+          results,
+          source: 'GitHub Session'
+        });
+      } catch (err) {
+        console.error('[DeveloperTool SW] GitHub session fetch error:', err);
+        sendResponse({
+          success: false,
+          needsLogin: false,
+          sessionUser: '',
+          results: [],
+          error: err.message
+        });
+      }
+    })();
+    return true;
+  }
+
+  if (message.action === 'OPEN_GITHUB_LOGIN') {
+    (async () => {
+      try {
+        await findOrOpenGitHubTab(true);
+        sendResponse({ success: true });
       } catch (err) {
         sendResponse({ success: false, error: err.message });
       }

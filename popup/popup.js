@@ -65,6 +65,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // State Variables
   let currentPlatform = 'jira'; // 'jira' | 'github'
   let jiraTickets = [];
+  let jiraAssigneeFilterApplied = false;
   let githubTickets = [];
   let githubRepoSummaries = [];
   let githubErrors = [];
@@ -150,10 +151,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (defaultJiraUrl) {
         const resp = await chrome.runtime.sendMessage({
           action: 'OPEN_AND_READ_BOARD',
-          url: defaultJiraUrl
+          url: defaultJiraUrl,
+          myTicketsOnly,
+          userIdentity: userEmail || ''
         });
         if (resp && resp.success) {
           jiraTickets = resp.tickets || [];
+          jiraAssigneeFilterApplied = !!resp.assigneeFilterApplied;
           sourceBadge.innerText = `Source: ${resp.source || 'Jira'}`;
           boardTitleLabel.innerText = resp.boardTitle || 'Jira Board';
         }
@@ -165,6 +169,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         githubRepoSummaries = ghData.repoSummaries || [];
         detectedSessionUser = ghData.sessionUser || '';
         githubErrors = ghData.errors || [];
+
+        if (ghData.needsLogin && githubErrors.length === 0) {
+          githubErrors = ['Log into GitHub in your browser to access private repositories, then refresh.'];
+        }
 
         if (!userEmail && detectedSessionUser) {
           userEmail = detectedSessionUser;
@@ -235,7 +243,29 @@ document.addEventListener('DOMContentLoaded', async () => {
       myTicketsOnly = !myTicketsOnly;
       await chrome.storage.local.set({ myTicketsOnly });
       updateUserUI();
-      renderTickets();
+      // Re-fetch Jira with assignee JQL so My Items is exact (not fuzzy client filter)
+      if (currentPlatform === 'jira' && defaultJiraUrl) {
+        showLoading(myTicketsOnly ? 'Filtering your Jira tickets...' : 'Loading all Jira tickets...');
+        try {
+          const resp = await chrome.runtime.sendMessage({
+            action: 'OPEN_AND_READ_BOARD',
+            url: defaultJiraUrl,
+            myTicketsOnly,
+            userIdentity: userEmail || ''
+          });
+          if (resp && resp.success) {
+            jiraTickets = resp.tickets || [];
+            jiraAssigneeFilterApplied = !!resp.assigneeFilterApplied;
+            sourceBadge.innerText = `Source: ${resp.source || 'Jira'}`;
+            boardTitleLabel.innerText = resp.boardTitle || 'Jira Board';
+          }
+        } catch (err) {
+          console.warn('[DeveloperTool] Jira re-fetch on My Items toggle failed:', err);
+        }
+        renderPlatformData();
+      } else {
+        renderTickets();
+      }
     });
   }
 
@@ -366,7 +396,26 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (searchInput) searchInput.addEventListener('input', renderTickets);
   if (statusFilterSelect) statusFilterSelect.addEventListener('change', renderTickets);
 
-  function matchesUserAssignee(ticket, userTarget) {
+  // Jira: exact email / display name / accountId / username only (no fuzzy matching)
+  function matchesJiraAssigneeExact(ticket, userTarget) {
+    if (!userTarget) return true;
+    if (!ticket) return false;
+
+    const target = userTarget.toLowerCase().trim();
+    const email = (ticket.assigneeEmail || '').toLowerCase().trim();
+    const name = (ticket.assignee || '').toLowerCase().trim();
+    const accountId = (ticket.assigneeAccountId || '').toLowerCase().trim();
+    const key = (ticket.assigneeKey || '').toLowerCase().trim();
+
+    if (email && email === target) return true;
+    if (name && name === target) return true;
+    if (accountId && accountId === target) return true;
+    if (key && key === target) return true;
+    return false;
+  }
+
+  // GitHub: login / author matching (still uses includes for username variants)
+  function matchesGitHubUser(ticket, userTarget) {
     if (!userTarget) return true;
     if (!ticket) return false;
 
@@ -375,22 +424,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     const assigneeEmail = (ticket.assigneeEmail || '').toLowerCase().trim();
     const authorName = (ticket.author || '').toLowerCase().trim();
 
-    if (assigneeName.includes(targetRaw) || targetRaw.includes(assigneeName)) return true;
-    if (assigneeEmail && (assigneeEmail.includes(targetRaw) || targetRaw.includes(assigneeEmail))) return true;
-    if (authorName && (authorName.includes(targetRaw) || targetRaw.includes(authorName))) return true;
+    if (assigneeName && (assigneeName === targetRaw || assigneeName.includes(targetRaw) || targetRaw.includes(assigneeName))) return true;
+    if (assigneeEmail && (assigneeEmail === targetRaw || assigneeEmail.includes(targetRaw))) return true;
+    if (authorName && (authorName === targetRaw || authorName.includes(targetRaw) || targetRaw.includes(authorName))) return true;
 
     const usernamePart = targetRaw.split('@')[0];
-    const targetTokens = usernamePart.split(/[\s._-]+/).filter(t => t.length > 1);
-
-    if (targetTokens.length > 0) {
-      const allMatch = targetTokens.every(token => assigneeName.includes(token) || assigneeEmail.includes(token) || authorName.includes(token));
-      if (allMatch) return true;
-
-      const anyMatch = targetTokens.some(token => assigneeName.includes(token) || authorName.includes(token));
-      if (anyMatch) return true;
+    if (usernamePart && (authorName === usernamePart || assigneeName === usernamePart || assigneeEmail === usernamePart)) {
+      return true;
     }
 
     return false;
+  }
+
+  function matchesUserAssignee(ticket, userTarget) {
+    if (currentPlatform === 'jira') {
+      return matchesJiraAssigneeExact(ticket, userTarget);
+    }
+    return matchesGitHubUser(ticket, userTarget);
   }
 
   function getFilteredTickets() {
@@ -410,7 +460,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const matchesStatus = statusVal === 'ALL' || t.status === statusVal;
 
-      const matchesUser = !myTicketsOnly || !activeUser || matchesUserAssignee(t, activeUser);
+      // Jira My Items already applied via assignee JQL / exact identity — don't fuzzy re-filter
+      let matchesUser = true;
+      if (myTicketsOnly) {
+        if (currentPlatform === 'jira' && jiraAssigneeFilterApplied) {
+          matchesUser = true;
+        } else if (activeUser) {
+          matchesUser = matchesUserAssignee(t, activeUser);
+        }
+      }
 
       const s = (t.status || '').toLowerCase();
       const isDone = s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('merged');
@@ -449,17 +507,21 @@ document.addEventListener('DOMContentLoaded', async () => {
       let emptyMsg = '<p>No items matched your filter or search query.</p>';
       
       if (currentPlatform === 'github' && githubErrors.length > 0) {
+        const needsLogin = githubErrors.some((e) => /log into github/i.test(e));
         emptyMsg = `
-          <div style="color: var(--apple-red); font-size: 12px; max-width: 320px; text-align: center;">
-            <p>⚠️ ${escapeHtml(githubErrors.join(', '))}</p>
-            <button id="errorConfigBtn" class="secondary-btn" style="margin-top: 10px;">Open Settings</button>
+          <div style="color: var(--accent-red, #ef4444); font-size: 12px; max-width: 340px; text-align: center;">
+            <p>${escapeHtml(githubErrors.join(' '))}</p>
+            <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top: 12px;">
+              ${needsLogin ? '<button id="githubLoginBtn" class="primary-btn">Log in to GitHub</button>' : ''}
+              <button id="errorConfigBtn" class="secondary-btn">Open Settings</button>
+            </div>
           </div>
         `;
       } else if (activeTickets.length > 0 && myTicketsOnly) {
         emptyMsg = `
           <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">
             <p>Found ${activeTickets.length} open item(s) in repo, but none matched your user name ("${escapeHtml(userEmail || detectedSessionUser)}").</p>
-            <p style="margin-top: 6px; font-weight: 600; color: var(--apple-blue);">Click 👤 "My Items" filter button above to show ALL open PRs.</p>
+            <p style="margin-top: 6px; font-weight: 600; color: var(--accent-blue, #2563eb);">Click 👤 "My Items" filter button above to show ALL open PRs.</p>
           </div>
         `;
       }
@@ -472,6 +534,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 
       const errBtn = document.getElementById('errorConfigBtn');
       if (errBtn) errBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+
+      const loginBtn = document.getElementById('githubLoginBtn');
+      if (loginBtn) {
+        loginBtn.addEventListener('click', async () => {
+          await chrome.runtime.sendMessage({ action: 'OPEN_GITHUB_LOGIN' });
+        });
+      }
 
       ticketsContainer.classList.remove('hidden');
       return;

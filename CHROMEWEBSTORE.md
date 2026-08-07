@@ -34,7 +34,7 @@ DeveloperTool brings an Apple-inspired light mode dashboard to your Jira workflo
 | `tabs` | Required to query open browser tabs and open ticket pages in new tabs. |
 | `scripting` | Required to inject the content parsing script into target Jira pages. |
 | `storage` | Required to persist user UI configuration and recent board history. |
-| `host_permissions` | Required to interact with custom domain Jira Server/DC and Jira Cloud (`*.atlassian.net`). |
+| `host_permissions` | Required to interact with custom domain Jira Server/DC and Jira Cloud (`*.atlassian.net`), and with `github.com` so private repos can be read via your browser login session. |
 
 ---
 
