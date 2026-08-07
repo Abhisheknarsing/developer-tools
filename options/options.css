@@ -48,8 +48,43 @@ body {
 .options-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-color);
+}
+
+.auto-save-indicator {
+  display: flex;
+  align-items: center;
+}
+
+.save-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.04);
+  padding: 4px 10px;
+  border-radius: 20px;
+  transition: all 0.2s ease;
+}
+
+.save-status .status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.save-status.saved {
+  color: var(--apple-green);
+  background: rgba(52, 199, 89, 0.12);
+}
+
+.save-status.saved .status-dot {
+  background: var(--apple-green);
 }
 
 .brand {

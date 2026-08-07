@@ -1,25 +1,40 @@
-// DeveloperTool - GitHub API & Activity Client
+// DeveloperTool - Enhanced GitHub API Client with Jira Key Extraction & PR Review Comments
 
 function parseGitHubRepoUrl(urlOrName) {
   if (!urlOrName) return null;
   let str = urlOrName.trim();
+  str = str.split('?')[0].split('#')[0];
+
   if (str.startsWith('http://') || str.startsWith('https://')) {
     try {
       const u = new URL(str);
       const parts = u.pathname.split('/').filter(Boolean);
       if (parts.length >= 2) {
-        return { owner: parts[0], repo: parts[1].replace('.git', '') };
+        return {
+          owner: parts[0].trim(),
+          repo: parts[1].replace(/\.git$/i, '').trim()
+        };
       }
     } catch (e) {
       return null;
     }
   } else {
     const parts = str.split('/').filter(Boolean);
-    if (parts.length === 2) {
-      return { owner: parts[0], repo: parts[1] };
+    if (parts.length >= 2) {
+      return {
+        owner: parts[0].trim(),
+        repo: parts[1].replace(/\.git$/i, '').trim()
+      };
     }
   }
   return null;
+}
+
+function extractJiraTicketKey(title = '', body = '', branch = '') {
+  const combined = `${title} ${branch} ${body}`;
+  // Regex matching keys like PROJ-123, DEV-456, KEY-789
+  const match = combined.match(/\b([A-Za-z]{2,10}-\d+)\b/);
+  return match ? match[1].toUpperCase() : null;
 }
 
 function calculateHoursAgo(dateStr) {
@@ -36,17 +51,83 @@ function calculateMinutesAgo(dateStr) {
   return Math.max(0, Math.floor((Date.now() - past) / 60000));
 }
 
-async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
+// Attempt to detect logged-in GitHub session user automatically
+async function detectActiveGitHubSessionUser(token = '') {
   try {
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=20`;
     const headers = { 'Accept': 'application/vnd.github.v3+json' };
     if (token) headers['Authorization'] = `token ${token}`;
 
-    const resp = await fetch(apiUrl, { headers });
-    if (!resp.ok) return [];
+    const resp = await fetch('https://api.github.com/user', {
+      headers,
+      credentials: 'include'
+    });
+
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.login) {
+        return data.login;
+      }
+    }
+  } catch (e) {
+    console.warn('[DeveloperTool] Could not auto-detect GitHub session user:', e);
+  }
+  return '';
+}
+
+// Fetch review comments for a specific PR
+async function fetchPRReviewComments(owner, repo, prNumber, token = '') {
+  try {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/comments?sort=created&direction=desc&per_page=5`;
+    const headers = { 'Accept': 'application/vnd.github.v3+json' };
+    if (token) headers['Authorization'] = `token ${token}`;
+
+    const resp = await fetch(apiUrl, { headers, credentials: 'include' });
+    if (!resp.ok) return { count: 0, lastComment: null };
+
+    const comments = await resp.json();
+    if (comments && comments.length > 0) {
+      const last = comments[0];
+      return {
+        count: comments.length,
+        lastCommentAuthor: last.user ? last.user.login : '',
+        lastCommentText: last.body ? (last.body.length > 90 ? last.body.substring(0, 90) + '...' : last.body) : '',
+        lastCommentDate: last.updated_at || last.created_at
+      };
+    }
+  } catch (e) {
+    console.warn(`[DeveloperTool] Could not fetch comments for PR #${prNumber}:`, e);
+  }
+  return { count: 0, lastComment: null };
+}
+
+async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
+  try {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=100`;
+    const headers = { 'Accept': 'application/vnd.github.v3+json' };
+    if (token) headers['Authorization'] = `token ${token}`;
+
+    const resp = await fetch(apiUrl, { headers, credentials: 'include' });
+    
+    if (!resp.ok) {
+      console.warn(`[DeveloperTool] GitHub API HTTP ${resp.status} for ${owner}/${repo}`);
+      if (resp.status === 403 || resp.status === 401) {
+        return {
+          error: `Rate limit or authentication error (HTTP ${resp.status}). Add a GitHub Token in Settings for private repos / higher limits.`,
+          pulls: []
+        };
+      }
+      if (resp.status === 404) {
+        return {
+          error: `Repository ${owner}/${repo} not found or private. Add a GitHub Token in Settings if it's private.`,
+          pulls: []
+        };
+      }
+      return { error: `HTTP ${resp.status} fetching ${owner}/${repo}`, pulls: [] };
+    }
 
     const pulls = await resp.json();
-    return pulls.map((pr) => {
+
+    const formattedPulls = await Promise.all(pulls.map(async (pr) => {
       const updatedAt = pr.updated_at || pr.created_at;
       const hoursAgo = calculateHoursAgo(updatedAt);
       const minutesAgo = calculateMinutesAgo(updatedAt);
@@ -57,14 +138,26 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
       if (pr.merged_at) stateLabel = 'Merged';
       if (pr.state === 'closed' && !pr.merged_at) stateLabel = 'Closed';
 
-      // Rule: Exclude closed / merged items from action required!
       const isDoneOrClosed = stateLabel === 'Closed' || stateLabel === 'Merged';
       const actionRequired = !isDoneOrClosed && hoursAgo >= 24;
 
+      const authorLogin = pr.user ? pr.user.login : '';
       const assigneesList = (pr.assignees || []).map((a) => a.login);
       if (pr.assignee && !assigneesList.includes(pr.assignee.login)) {
         assigneesList.push(pr.assignee.login);
       }
+
+      // Extract Linked Jira Ticket Key (e.g. PROJ-123)
+      const branchRef = pr.head ? pr.head.ref : '';
+      const linkedJiraKey = extractJiraTicketKey(pr.title, pr.body, branchRef);
+
+      // Fetch review comment data
+      const commentData = await fetchPRReviewComments(owner, repo, pr.number, token);
+      const hasUnresolvedComments = commentData.count > 0;
+
+      // Comment snippet
+      const commentAuthor = commentData.lastCommentAuthor || authorLogin || 'Author';
+      const commentText = commentData.lastCommentText || (pr.body ? (pr.body.length > 90 ? pr.body.substring(0, 90) + '...' : pr.body) : 'Pull Request Open');
 
       return {
         id: `pr-${pr.id}`,
@@ -72,36 +165,86 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
         repo: `${owner}/${repo}`,
         summary: pr.title,
         status: stateLabel,
-        priority: pr.draft ? 'Low' : 'High',
-        assignee: assigneesList.join(', ') || (pr.user ? pr.user.login : 'Unassigned'),
-        assigneeEmail: pr.user ? pr.user.login : '',
+        priority: pr.draft ? 'Low' : (hasUnresolvedComments ? 'High' : 'Medium'),
+        author: authorLogin,
+        assignee: assigneesList.join(', ') || authorLogin || 'Unassigned',
+        assigneeEmail: authorLogin,
         type: 'Pull Request',
         url: pr.html_url,
-        lastCommentAuthor: pr.user ? pr.user.login : 'Author',
-        lastCommentText: pr.body ? (pr.body.length > 80 ? pr.body.substring(0, 80) + '...' : pr.body) : 'Pull Request',
-        lastCommentDate: updatedAt,
+        linkedJiraKey,
+        reviewCommentsCount: commentData.count,
+        hasUnresolvedComments,
+        lastCommentAuthor: commentAuthor,
+        lastCommentText: commentText,
+        lastCommentDate: commentData.lastCommentDate || updatedAt,
         hoursSinceUpdate: hoursAgo,
         minutesSinceUpdate: minutesAgo,
         actionRequired,
         isGitHub: true
       };
-    });
+    }));
+
+    return { pulls: formattedPulls };
   } catch (err) {
     console.warn(`[DeveloperTool] Error fetching PRs for ${owner}/${repo}:`, err);
-    return [];
+    return { error: err.message, pulls: [] };
   }
 }
 
+async function fetchAllGitHubData(repoList = [], token = '', userTarget = '') {
+  if (!repoList || repoList.length === 0) {
+    return { pullRequests: [], repoSummaries: [], sessionUser: '', errors: [] };
+  }
+
+  const sessionUser = await detectActiveGitHubSessionUser(token);
+  const effectiveUser = (userTarget || sessionUser || '').toLowerCase().trim();
+
+  const repoSummaries = [];
+  const allPRs = [];
+  const errorList = [];
+
+  for (const repoItem of repoList) {
+    const parsed = parseGitHubRepoUrl(repoItem);
+    if (!parsed) continue;
+
+    const repoFullName = `${parsed.owner}/${parsed.repo}`;
+    const result = await fetchGitHubRepoPullRequests(parsed.owner, parsed.repo, token);
+    
+    if (result.error) {
+      errorList.push(`${repoFullName}: ${result.error}`);
+    }
+
+    const pulls = result.pulls || [];
+    allPRs.push(...pulls);
+
+    // Calculate per-repo metrics
+    const openPRs = pulls.filter(p => p.status === 'Open' || p.status === 'Draft').length;
+    const myPRs = pulls.filter(p => {
+      if (!effectiveUser) return false;
+      const author = (p.author || '').toLowerCase();
+      const assignee = (p.assignee || '').toLowerCase();
+      return author.includes(effectiveUser) || assignee.includes(effectiveUser);
+    }).length;
+
+    repoSummaries.push({
+      repo: repoFullName,
+      openPRs,
+      myPRs,
+      actionNeeded: pulls.filter(p => p.actionRequired).length,
+      unresolvedComments: pulls.filter(p => p.hasUnresolvedComments).length
+    });
+  }
+
+  return {
+    pullRequests: allPRs,
+    repoSummaries,
+    sessionUser: sessionUser || userTarget,
+    errors: errorList
+  };
+}
+
+// Fallback legacy export
 async function fetchAllGitHubItems(repoList = [], token = '') {
-  if (!repoList || repoList.length === 0) return [];
-
-  const results = await Promise.all(
-    repoList.map(async (repoItem) => {
-      const parsed = parseGitHubRepoUrl(repoItem);
-      if (!parsed) return [];
-      return await fetchGitHubRepoPullRequests(parsed.owner, parsed.repo, token);
-    })
-  );
-
-  return results.flat();
+  const data = await fetchAllGitHubData(repoList, token);
+  return data.pullRequests;
 }

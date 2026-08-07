@@ -18,6 +18,11 @@
           <p>Manage your Jira board, GitHub repositories, and user tracking settings</p>
         </div>
       </div>
+      <div class="auto-save-indicator">
+        <span id="saveStatus" class="save-status">
+          <span class="status-dot"></span> Auto-Saved
+        </span>
+      </div>
     </header>
 
     <main class="options-body">
@@ -29,7 +34,7 @@
         <div class="form-group">
           <label for="jiraUrl">Default Jira Board URL</label>
           <input type="text" id="jiraUrl" placeholder="https://company.atlassian.net/jira/software/projects/KEY/boards/1" />
-          <small class="form-help">Enter your project or sprint board link.</small>
+          <small class="form-help">Enter your project or sprint board link. Changes save instantly.</small>
         </div>
       </section>
 
@@ -41,7 +46,7 @@
         <div class="form-group">
           <label for="userEmail">Your Email / Username</label>
           <input type="text" id="userEmail" placeholder="user@company.com or First Last" />
-          <small class="form-help">Used to filter and show tickets and Pull Requests assigned specifically to you.</small>
+          <small class="form-help">Used to filter and match tickets & PRs assigned specifically to you.</small>
         </div>
         <div class="form-group checkbox-group">
           <label class="checkbox-label">
@@ -70,12 +75,6 @@
           <small class="form-help">Required for private repositories or to increase GitHub API rate limits.</small>
         </div>
       </section>
-
-      <!-- Save Actions -->
-      <div class="action-footer">
-        <span id="saveStatus" class="save-status hidden">Settings saved successfully!</span>
-        <button id="saveBtn" class="primary-btn">Save Configuration</button>
-      </div>
     </main>
   </div>
 

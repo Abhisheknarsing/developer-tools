@@ -8,7 +8,7 @@
 </head>
 <body>
   <div class="app-container">
-    <!-- Apple DNA Header -->
+    <!-- Apple DNA Translucent Header -->
     <header class="app-header">
       <div class="brand">
         <div class="brand-icon">
@@ -36,48 +36,54 @@
       </div>
     </header>
 
-    <!-- Dashboard Header Stats -->
+    <!-- Priority Goal Stats Header -->
     <section id="statsSection" class="stats-section hidden">
       <div class="stat-card total">
         <span class="stat-value" id="statTotal">0</span>
-        <span class="stat-label">Total</span>
+        <span class="stat-label" id="labelTotal">Total</span>
       </div>
       <div class="stat-card todo">
         <span class="stat-value" id="statTodo">0</span>
-        <span class="stat-label">To Do</span>
+        <span class="stat-label" id="labelTodo">To Do</span>
       </div>
       <div class="stat-card in-progress">
         <span class="stat-value" id="statInProgress">0</span>
-        <span class="stat-label">In Progress</span>
+        <span class="stat-label" id="labelInProgress">In Progress</span>
       </div>
       <div class="stat-card done">
         <span class="stat-value" id="statDone">0</span>
-        <span class="stat-label">Done</span>
+        <span class="stat-label" id="labelDone">Done</span>
       </div>
       <div class="stat-card action-needed">
         <span class="stat-value" id="statActionRequired">0</span>
-        <span class="stat-label">Action Needed</span>
+        <span class="stat-label" id="labelActionNeeded">Action Needed</span>
       </div>
     </section>
 
-    <!-- Toolbar & Filters -->
+    <!-- GitHub Repositories Summary Chips -->
+    <section id="githubRepoOverview" class="repo-overview-section hidden">
+      <span class="repo-overview-title">Repositories:</span>
+      <div id="repoChipsContainer" class="repo-chips-container"></div>
+    </section>
+
+    <!-- Goal Priority Filters & Toolbar -->
     <section id="toolbarSection" class="toolbar-section hidden">
       <div class="search-wrapper">
         <svg class="search-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
         <input type="text" id="searchInput" placeholder="Search key, title, comments..." />
       </div>
       <div class="filter-controls">
-        <button id="myTicketsToggleBtn" class="my-tickets-btn active" title="Toggle My Tickets Only">
+        <button id="myTicketsToggleBtn" class="my-tickets-btn active" title="Toggle My Items Only">
           <span class="user-icon">👤</span>
           <span class="toggle-text">My Items</span>
         </button>
-        <button id="staleFilterBtn" class="stale-filter-btn" title="Filter tickets needing action (>24h without update)">
+        <button id="staleFilterBtn" class="stale-filter-btn" title="Items with no update >24h">
           <span class="alert-icon">🚨</span>
-          <span class="toggle-text">Stale (>24h)</span>
+          <span class="toggle-text">>24h Stale</span>
         </button>
-        <button id="recent5mFilterBtn" class="recent-filter-btn" title="Show recent activity (comments in last 5 min)">
-          <span class="recent-icon">⚡</span>
-          <span class="toggle-text">Recent (<5m)</span>
+        <button id="unresolvedCommentsFilterBtn" class="comments-filter-btn" title="PRs / Items with comments needing feedback">
+          <span class="comment-icon">💬</span>
+          <span class="toggle-text">Comments</span>
         </button>
         <select id="statusFilterSelect">
           <option value="ALL">All Statuses</option>

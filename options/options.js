@@ -1,11 +1,10 @@
-// DeveloperTool Options Page Controller
+// DeveloperTool Options Page Controller (Auto-Save on Change)
 document.addEventListener('DOMContentLoaded', async () => {
   const jiraUrlInput = document.getElementById('jiraUrl');
   const userEmailInput = document.getElementById('userEmail');
   const myTicketsOnlyCheckbox = document.getElementById('myTicketsOnly');
   const githubReposTextarea = document.getElementById('githubRepos');
   const githubTokenInput = document.getElementById('githubToken');
-  const saveBtn = document.getElementById('saveBtn');
   const saveStatus = document.getElementById('saveStatus');
 
   // Load Saved Storage
@@ -27,13 +26,13 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   if (config.githubToken) githubTokenInput.value = config.githubToken;
 
-  // Save Settings Event Handler
-  saveBtn.addEventListener('click', async () => {
+  let debounceTimer = null;
+
+  async function performAutoSave() {
     const defaultJiraUrl = jiraUrlInput.value.trim();
     const userEmail = userEmailInput.value.trim();
     const myTicketsOnly = myTicketsOnlyCheckbox.checked;
 
-    // Parse multi-line GitHub Repos textarea
     const rawRepos = githubReposTextarea.value.split('\n');
     const githubRepos = rawRepos
       .map((r) => r.trim())
@@ -49,10 +48,27 @@ document.addEventListener('DOMContentLoaded', async () => {
       githubToken
     });
 
-    // Show toast feedback
-    saveStatus.classList.remove('hidden');
-    setTimeout(() => {
-      saveStatus.classList.add('hidden');
-    }, 2500);
+    if (saveStatus) {
+      saveStatus.classList.add('saved');
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        saveStatus.classList.remove('saved');
+      }, 1500);
+    }
+  }
+
+  // Auto-Save Event Listeners for All Form Controls
+  [jiraUrlInput, userEmailInput, githubTokenInput].forEach((input) => {
+    input.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(performAutoSave, 400);
+    });
   });
+
+  githubReposTextarea.addEventListener('input', () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(performAutoSave, 500);
+  });
+
+  myTicketsOnlyCheckbox.addEventListener('change', performAutoSave);
 });

@@ -16,11 +16,20 @@ document.addEventListener('DOMContentLoaded', async () => {
   const statDone = document.getElementById('statDone');
   const statActionRequired = document.getElementById('statActionRequired');
 
+  const labelTotal = document.getElementById('labelTotal');
+  const labelTodo = document.getElementById('labelTodo');
+  const labelInProgress = document.getElementById('labelInProgress');
+  const labelDone = document.getElementById('labelDone');
+  const labelActionNeeded = document.getElementById('labelActionNeeded');
+
+  const githubRepoOverview = document.getElementById('githubRepoOverview');
+  const repoChipsContainer = document.getElementById('repoChipsContainer');
+
   const toolbarSection = document.getElementById('toolbarSection');
   const searchInput = document.getElementById('searchInput');
   const myTicketsToggleBtn = document.getElementById('myTicketsToggleBtn');
   const staleFilterBtn = document.getElementById('staleFilterBtn');
-  const recent5mFilterBtn = document.getElementById('recent5mFilterBtn');
+  const unresolvedCommentsFilterBtn = document.getElementById('unresolvedCommentsFilterBtn');
   const statusFilterSelect = document.getElementById('statusFilterSelect');
   const viewBoardBtn = document.getElementById('viewBoardBtn');
   const viewListBtn = document.getElementById('viewListBtn');
@@ -43,6 +52,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   let currentPlatform = 'jira'; // 'jira' | 'github'
   let jiraTickets = [];
   let githubTickets = [];
+  let githubRepoSummaries = [];
+  let githubErrors = [];
+  let detectedSessionUser = '';
   let activeViewMode = 'board';
 
   let userEmail = '';
@@ -51,7 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let githubToken = '';
   let myTicketsOnly = true;
   let staleOnly = false;
-  let recent5mOnly = false;
+  let unresolvedCommentsOnly = false;
 
   // Load User Configuration from Chrome Local Storage
   const userConfig = await chrome.storage.local.get([
@@ -113,12 +125,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // If Jira URL is configured, fetch on launch
-  if (defaultJiraUrl) {
+  // Initial Fetch
+  if (defaultJiraUrl || githubRepos.length > 0) {
     triggerFetchAllData();
-  } else if (githubRepos.length > 0) {
-    currentPlatform = 'github';
-    if (githubTabBtn) githubTabBtn.click();
   }
 
   async function triggerFetchAllData() {
@@ -136,8 +145,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
       }
 
-      if (githubRepos.length > 0 && typeof fetchAllGitHubItems === 'function') {
-        githubTickets = await fetchAllGitHubItems(githubRepos, githubToken);
+      if (githubRepos.length > 0 && typeof fetchAllGitHubData === 'function') {
+        const ghData = await fetchAllGitHubData(githubRepos, githubToken, userEmail);
+        githubTickets = ghData.pullRequests || [];
+        githubRepoSummaries = ghData.repoSummaries || [];
+        detectedSessionUser = ghData.sessionUser || '';
+        githubErrors = ghData.errors || [];
+
+        if (!userEmail && detectedSessionUser) {
+          userEmail = detectedSessionUser;
+          updateUserUI();
+        }
       }
 
       renderPlatformData();
@@ -147,10 +165,44 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function renderPlatformData() {
-    const tickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
+    const isGH = currentPlatform === 'github';
+    const tickets = isGH ? githubTickets : jiraTickets;
+
+    // Update stat card labels for GitHub vs Jira
+    if (labelTotal) labelTotal.innerText = isGH ? 'Total PRs' : 'Total';
+    if (labelTodo) labelTodo.innerText = isGH ? 'Open PRs' : 'To Do';
+    if (labelInProgress) labelInProgress.innerText = isGH ? 'My PRs' : 'In Progress';
+    if (labelDone) labelDone.innerText = isGH ? 'Merged/Closed' : 'Done';
+    if (labelActionNeeded) labelActionNeeded.innerText = 'Action Needed';
+
+    // Render GitHub Repos Summary Chips
+    if (isGH && githubRepoSummaries.length > 0) {
+      renderRepoChips(githubRepoSummaries);
+      githubRepoOverview.classList.remove('hidden');
+    } else {
+      githubRepoOverview.classList.add('hidden');
+    }
+
     renderStats(tickets);
     renderStatusFilterOptions(tickets);
     renderTickets();
+  }
+
+  function renderRepoChips(summaries) {
+    if (!repoChipsContainer) return;
+    repoChipsContainer.innerHTML = '';
+
+    summaries.forEach((summary) => {
+      const chip = document.createElement('div');
+      chip.className = 'repo-chip';
+      chip.title = `${summary.repo}: ${summary.openPRs} open PRs, ${summary.myPRs} by me`;
+      chip.innerHTML = `
+        <span class="repo-chip-name">${escapeHtml(summary.repo)}</span>
+        <span class="repo-chip-pill" title="Total Open PRs">${summary.openPRs} Open</span>
+        ${summary.myPRs > 0 ? `<span class="repo-chip-pill my-prs" title="My PRs">${summary.myPRs} Mine</span>` : ''}
+      `;
+      repoChipsContainer.appendChild(chip);
+    });
   }
 
   // Refresh Button Listener
@@ -181,10 +233,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  if (recent5mFilterBtn) {
-    recent5mFilterBtn.addEventListener('click', () => {
-      recent5mOnly = !recent5mOnly;
-      recent5mFilterBtn.classList.toggle('active', recent5mOnly);
+  if (unresolvedCommentsFilterBtn) {
+    unresolvedCommentsFilterBtn.addEventListener('click', () => {
+      unresolvedCommentsOnly = !unresolvedCommentsOnly;
+      unresolvedCommentsFilterBtn.classList.toggle('active', unresolvedCommentsOnly);
       renderTickets();
     });
   }
@@ -192,8 +244,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   function updateUserUI() {
     if (myTicketsToggleBtn) myTicketsToggleBtn.classList.toggle('active', myTicketsOnly);
     if (userLabel) {
-      userLabel.innerText = userEmail ? `👤 ${userEmail}` : '';
-      userLabel.title = userEmail ? `User: ${userEmail}` : '';
+      const displayUser = userEmail || detectedSessionUser;
+      userLabel.innerText = displayUser ? `👤 ${displayUser}` : '';
+      userLabel.title = displayUser ? `User: ${displayUser}` : '';
     }
   }
 
@@ -223,6 +276,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // --- Stats & Filter Logic ---
   function renderStats(tickets) {
+    const isGH = currentPlatform === 'github';
     const total = tickets.length;
 
     const todoCount = tickets.filter(t => {
@@ -230,10 +284,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       return s.includes('to do') || s.includes('backlog') || s.includes('open') || s.includes('draft');
     }).length;
 
-    const inProgCount = tickets.filter(t => {
-      const s = (t.status || '').toLowerCase();
-      return s.includes('in progress') || s.includes('in review') || s.includes('dev') || s.includes('testing');
-    }).length;
+    const effectiveUser = (userEmail || detectedSessionUser || '').toLowerCase().trim();
+    const inProgCount = isGH
+      ? tickets.filter(t => matchesUserAssignee(t, effectiveUser)).length
+      : tickets.filter(t => {
+          const s = (t.status || '').toLowerCase();
+          return s.includes('in progress') || s.includes('in review') || s.includes('dev') || s.includes('testing');
+        }).length;
 
     const doneCount = tickets.filter(t => {
       const s = (t.status || '').toLowerCase();
@@ -302,18 +359,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     const targetRaw = userTarget.toLowerCase().trim();
     const assigneeName = (ticket.assignee || '').toLowerCase().trim();
     const assigneeEmail = (ticket.assigneeEmail || '').toLowerCase().trim();
+    const authorName = (ticket.author || '').toLowerCase().trim();
 
     if (assigneeName.includes(targetRaw) || targetRaw.includes(assigneeName)) return true;
     if (assigneeEmail && (assigneeEmail.includes(targetRaw) || targetRaw.includes(assigneeEmail))) return true;
+    if (authorName && (authorName.includes(targetRaw) || targetRaw.includes(authorName))) return true;
 
     const usernamePart = targetRaw.split('@')[0];
     const targetTokens = usernamePart.split(/[\s._-]+/).filter(t => t.length > 1);
 
     if (targetTokens.length > 0) {
-      const allMatch = targetTokens.every(token => assigneeName.includes(token) || assigneeEmail.includes(token));
+      const allMatch = targetTokens.every(token => assigneeName.includes(token) || assigneeEmail.includes(token) || authorName.includes(token));
       if (allMatch) return true;
 
-      const anyMatch = targetTokens.some(token => assigneeName.includes(token));
+      const anyMatch = targetTokens.some(token => assigneeName.includes(token) || authorName.includes(token));
       if (anyMatch) return true;
     }
 
@@ -324,6 +383,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const activeTickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
     const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
     const statusVal = statusFilterSelect ? statusFilterSelect.value : 'ALL';
+    const activeUser = userEmail || detectedSessionUser;
 
     return activeTickets.filter((t) => {
       const matchesSearch =
@@ -331,11 +391,12 @@ document.addEventListener('DOMContentLoaded', async () => {
         t.key.toLowerCase().includes(query) ||
         t.summary.toLowerCase().includes(query) ||
         t.assignee.toLowerCase().includes(query) ||
+        (t.linkedJiraKey && t.linkedJiraKey.toLowerCase().includes(query)) ||
         (t.lastCommentText && t.lastCommentText.toLowerCase().includes(query));
 
       const matchesStatus = statusVal === 'ALL' || t.status === statusVal;
 
-      const matchesUser = !myTicketsOnly || !userEmail || matchesUserAssignee(t, userEmail);
+      const matchesUser = !myTicketsOnly || !activeUser || matchesUserAssignee(t, activeUser);
 
       const s = (t.status || '').toLowerCase();
       const isDone = s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('merged');
@@ -343,10 +404,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Rule: Done tickets NEVER match stale filter!
       const matchesStale = !staleOnly || (!isDone && t.actionRequired);
 
-      const matchesRecent5m = !recent5mOnly || (typeof t.minutesSinceUpdate === 'number' && t.minutesSinceUpdate <= 5);
+      const matchesUnresolvedComments = !unresolvedCommentsOnly || t.hasUnresolvedComments || !!t.lastCommentText;
 
-      return matchesSearch && matchesStatus && matchesUser && matchesStale && matchesRecent5m;
+      return matchesSearch && matchesStatus && matchesUser && matchesStale && matchesUnresolvedComments;
     });
+  }
+
+  function getJiraBaseUrl(defaultUrl) {
+    if (!defaultUrl) return '';
+    try {
+      const u = new URL(defaultUrl);
+      return `${u.protocol}//${u.host}`;
+    } catch (e) {
+      return '';
+    }
   }
 
   function renderTickets() {
@@ -356,15 +427,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (refreshBtn) refreshBtn.classList.remove('spinning');
 
     const filtered = getFilteredTickets();
+    const activeTickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
 
     if (!ticketsContainer) return;
 
     if (filtered.length === 0) {
+      let emptyMsg = '<p>No items matched your filter or search query.</p>';
+      
+      if (currentPlatform === 'github' && githubErrors.length > 0) {
+        emptyMsg = `
+          <div style="color: var(--apple-red); font-size: 12px; max-width: 320px; text-align: center;">
+            <p>⚠️ ${escapeHtml(githubErrors.join(', '))}</p>
+            <button id="errorConfigBtn" class="secondary-btn" style="margin-top: 10px;">Open Settings</button>
+          </div>
+        `;
+      } else if (activeTickets.length > 0 && myTicketsOnly) {
+        emptyMsg = `
+          <div style="font-size: 12px; color: var(--text-secondary); text-align: center;">
+            <p>Found ${activeTickets.length} open item(s) in repo, but none matched your user name ("${escapeHtml(userEmail || detectedSessionUser)}").</p>
+            <p style="margin-top: 6px; font-weight: 600; color: var(--apple-blue);">Click 👤 "My Items" filter button above to show ALL open PRs.</p>
+          </div>
+        `;
+      }
+
       ticketsContainer.innerHTML = `
         <div class="state-container">
-          <p>No items matched your filter or search query.</p>
+          ${emptyMsg}
         </div>
       `;
+
+      const errBtn = document.getElementById('errorConfigBtn');
+      if (errBtn) errBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+
       ticketsContainer.classList.remove('hidden');
       return;
     }
@@ -417,10 +511,22 @@ document.addEventListener('DOMContentLoaded', async () => {
       `;
     }
 
+    // Linked Jira Ticket Badge on GitHub PR
+    let linkedJiraHtml = '';
+    if (ticket.isGitHub && ticket.linkedJiraKey) {
+      const jiraBase = getJiraBaseUrl(defaultJiraUrl);
+      const jiraTicketUrl = jiraBase ? `${jiraBase}/browse/${ticket.linkedJiraKey}` : '#';
+      linkedJiraHtml = `
+        <span class="linked-jira-badge" data-jira-url="${jiraTicketUrl}" title="Linked Jira Ticket: ${ticket.linkedJiraKey}">
+          📌 ${ticket.linkedJiraKey}
+        </span>
+      `;
+    }
+
     let commentHtml = '';
     if (ticket.lastCommentText) {
       commentHtml = `
-        <div class="comment-box">
+        <div class="comment-box ${ticket.hasUnresolvedComments ? 'unresolved-comments' : ''}">
           <div class="comment-header">
             <span class="comment-author">💬 ${escapeHtml(ticket.lastCommentAuthor || 'User')}</span>
             <span class="comment-time">${ticket.hoursSinceUpdate ? `${ticket.hoursSinceUpdate}h ago` : ''}</span>
@@ -433,7 +539,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     card.innerHTML = `
       ${actionBadgeHtml}
       <div class="ticket-top">
-        <span class="ticket-key">${ticket.key} ${ticket.isGitHub ? `(${escapeHtml(ticket.repo)})` : ''}</span>
+        <div class="ticket-key-group">
+          <span class="ticket-key">${ticket.key} ${ticket.isGitHub ? `(${escapeHtml(ticket.repo)})` : ''}</span>
+          ${linkedJiraHtml}
+        </div>
         <span class="status-badge ${statusClass}">${ticket.status}</span>
       </div>
       <div class="ticket-summary">${escapeHtml(ticket.summary)}</div>
@@ -448,6 +557,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         </div>
       </div>
     `;
+
+    // Linked Jira Badge Click Listener
+    const jiraBadgeElem = card.querySelector('.linked-jira-badge');
+    if (jiraBadgeElem) {
+      jiraBadgeElem.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const jiraUrl = jiraBadgeElem.getAttribute('data-jira-url');
+        if (jiraUrl && jiraUrl !== '#') {
+          window.open(jiraUrl, '_blank');
+        }
+      });
+    }
 
     card.addEventListener('click', (e) => {
       e.preventDefault();
@@ -513,7 +635,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const activeTickets = currentPlatform === 'jira' ? jiraTickets : githubTickets;
       if (activeTickets.length === 0) return;
 
-      const headers = ['Key', 'Summary', 'Status', 'Priority', 'Assignee', 'Last Comment Author', 'Last Comment Text', 'Action Required', 'URL'];
+      const headers = ['Key', 'Summary', 'Status', 'Priority', 'Assignee', 'Linked Jira Ticket', 'Last Comment Author', 'Last Comment Text', 'Action Required', 'URL'];
       const csvRows = [headers.join(',')];
 
       activeTickets.forEach((t) => {
@@ -523,6 +645,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           `"${t.status.replace(/"/g, '""')}"`,
           `"${t.priority.replace(/"/g, '""')}"`,
           `"${t.assignee.replace(/"/g, '""')}"`,
+          `"${(t.linkedJiraKey || '').replace(/"/g, '""')}"`,
           `"${(t.lastCommentAuthor || '').replace(/"/g, '""')}"`,
           `"${(t.lastCommentText || '').replace(/"/g, '""')}"`,
           `"${t.actionRequired ? 'YES' : 'NO'}"`,
