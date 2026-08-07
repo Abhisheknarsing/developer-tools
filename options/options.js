@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const jiraUrlInput = document.getElementById('jiraUrl');
   const userEmailInput = document.getElementById('userEmail');
   const myTicketsOnlyCheckbox = document.getElementById('myTicketsOnly');
+  const githubHostInput = document.getElementById('githubHost');
   const githubReposTextarea = document.getElementById('githubRepos');
   const githubTokenInput = document.getElementById('githubToken');
   const saveStatus = document.getElementById('saveStatus');
@@ -12,6 +13,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     'defaultJiraUrl',
     'userEmail',
     'myTicketsOnly',
+    'githubHost',
     'githubRepos',
     'githubToken'
   ]);
@@ -19,6 +21,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (config.defaultJiraUrl) jiraUrlInput.value = config.defaultJiraUrl;
   if (config.userEmail) userEmailInput.value = config.userEmail;
   if (typeof config.myTicketsOnly === 'boolean') myTicketsOnlyCheckbox.checked = config.myTicketsOnly;
+  if (config.githubHost) githubHostInput.value = config.githubHost;
   if (config.githubRepos && Array.isArray(config.githubRepos)) {
     githubReposTextarea.value = config.githubRepos.join('\n');
   } else if (typeof config.githubRepos === 'string') {
@@ -32,6 +35,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const defaultJiraUrl = jiraUrlInput.value.trim();
     const userEmail = userEmailInput.value.trim();
     const myTicketsOnly = myTicketsOnlyCheckbox.checked;
+    const githubHost = githubHostInput.value.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
 
     const rawRepos = githubReposTextarea.value.split('\n');
     const githubRepos = rawRepos
@@ -44,6 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       defaultJiraUrl,
       userEmail,
       myTicketsOnly,
+      githubHost,
       githubRepos,
       githubToken
     });
@@ -58,7 +63,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // Auto-Save Event Listeners for All Form Controls
-  [jiraUrlInput, userEmailInput, githubTokenInput].forEach((input) => {
+  [jiraUrlInput, userEmailInput, githubHostInput, githubTokenInput].forEach((input) => {
     input.addEventListener('input', () => {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(performAutoSave, 400);

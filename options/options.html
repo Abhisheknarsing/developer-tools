@@ -65,19 +65,25 @@
 
         <div class="form-group info-callout">
           <strong>Private repos use your browser login</strong>
-          <p>Stay logged into <a href="https://github.com/login" target="_blank" rel="noopener noreferrer">github.com</a> in Chrome. DeveloperTool reads pull requests with your existing session — same idea as Jira — so private repos you can open in the browser work without a token.</p>
+          <p>Stay logged into your GitHub host in Chrome (github.com <em>or</em> Enterprise like <code>github.securian.com</code>). DeveloperTool uses that host’s session — not github.com if your company uses Enterprise.</p>
+        </div>
+
+        <div class="form-group">
+          <label for="githubHost">GitHub Host (Enterprise supported)</label>
+          <input type="text" id="githubHost" placeholder="github.securian.com" />
+          <small class="form-help">Example: <code>github.securian.com</code>. Leave blank to auto-detect from repository URLs below.</small>
         </div>
         
         <div class="form-group">
           <label for="githubRepos">GitHub Repositories (1 per line)</label>
-          <textarea id="githubRepos" rows="5" placeholder="https://github.com/facebook/react&#10;https://github.com/vercel/next.js&#10;owner/repo-name"></textarea>
-          <small class="form-help">Supported formats: <code>https://github.com/owner/repo</code> or <code>owner/repo</code></small>
+          <textarea id="githubRepos" rows="5" placeholder="https://github.securian.com/securian/your-repo&#10;https://github.com/facebook/react&#10;owner/repo-name"></textarea>
+          <small class="form-help">Prefer full URLs for Enterprise: <code>https://github.securian.com/org/repo</code>. Short <code>owner/repo</code> uses the host above.</small>
         </div>
 
         <div class="form-group">
           <label for="githubToken">GitHub Personal Access Token (Optional fallback)</label>
           <input type="password" id="githubToken" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" />
-          <small class="form-help">Only needed if you are not logged into GitHub in this browser, or for higher API rate limits.</small>
+          <small class="form-help">Only needed if you are not logged into that GitHub host in this browser, or for higher API rate limits.</small>
         </div>
       </section>
     </main>

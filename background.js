@@ -47,18 +47,32 @@ async function ensureGitHubSessionScriptInjected(tabId) {
   }
 }
 
-async function findOrOpenGitHubTab(preferLogin = false) {
+async function findOrOpenGitHubTab(preferLogin = false, host = 'github.com') {
+  const normalizedHost = String(host || 'github.com')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^www\./i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase() || 'github.com';
+  const origin = `https://${normalizedHost}`;
+  const hostPattern = normalizedHost.replace(/\./g, '\\.');
+
   const tabs = await chrome.tabs.query({});
   let targetTab = tabs.find(
-    (t) => t.url && /https?:\/\/(www\.)?github\.com/i.test(t.url) && !/\/login/i.test(t.url)
+    (t) =>
+      t.url &&
+      new RegExp(`https?:\\/\\/(www\\.)?${hostPattern}`, 'i').test(t.url) &&
+      !/\/(login|session)/i.test(t.url)
   );
 
   if (!targetTab && preferLogin) {
-    targetTab = tabs.find((t) => t.url && /https?:\/\/(www\.)?github\.com\/login/i.test(t.url));
+    targetTab = tabs.find(
+      (t) => t.url && new RegExp(`https?:\\/\\/(www\\.)?${hostPattern}\\/(login|session)`, 'i').test(t.url)
+    );
   }
 
   if (!targetTab) {
-    const url = preferLogin ? 'https://github.com/login' : 'https://github.com/';
+    const url = preferLogin ? `${origin}/login` : origin;
     targetTab = await chrome.tabs.create({ url, active: preferLogin });
     await waitForTabLoad(targetTab.id);
   } else if (targetTab.status !== 'complete') {
@@ -67,7 +81,7 @@ async function findOrOpenGitHubTab(preferLogin = false) {
 
   await new Promise((r) => setTimeout(r, 600));
   await ensureGitHubSessionScriptInjected(targetTab.id);
-  return targetTab;
+  return { tab: targetTab, host: normalizedHost, origin };
 }
 
 async function sendGitHubTabMessage(tabId, message) {
@@ -215,74 +229,102 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Fetch private/public GitHub PRs using the browser's logged-in GitHub session
+  // Supports github.com and GitHub Enterprise hosts (e.g. github.securian.com)
   if (message.action === 'FETCH_GITHUB_VIA_SESSION') {
     (async () => {
       try {
         const repos = Array.isArray(message.repos) ? message.repos : [];
         if (repos.length === 0) {
-          sendResponse({ success: true, sessionUser: '', results: [], needsLogin: false });
+          sendResponse({ success: true, sessionUser: '', results: [], needsLogin: false, githubHost: 'github.com' });
           return;
         }
 
-        let targetTab = await findOrOpenGitHubTab(false);
-        let sessionInfo = await sendGitHubTabMessage(targetTab.id, { action: 'DETECT_GITHUB_SESSION' });
+        // Group by host so Enterprise and github.com sessions stay separate
+        const byHost = {};
+        repos.forEach((repoItem) => {
+          const host = (repoItem.host || message.host || 'github.com').toLowerCase();
+          if (!byHost[host]) byHost[host] = [];
+          byHost[host].push(repoItem);
+        });
 
-        if (!sessionInfo || !sessionInfo.loggedIn) {
-          // Open login so the user can authenticate with their browser session
-          targetTab = await findOrOpenGitHubTab(true);
-          sessionInfo = await sendGitHubTabMessage(targetTab.id, { action: 'DETECT_GITHUB_SESSION' });
+        const allResults = [];
+        let sessionUser = '';
+        let primaryHost = message.host || Object.keys(byHost)[0] || 'github.com';
+
+        for (const host of Object.keys(byHost)) {
+          primaryHost = host;
+          let opened = await findOrOpenGitHubTab(false, host);
+          let targetTab = opened.tab;
+          let sessionInfo = await sendGitHubTabMessage(targetTab.id, {
+            action: 'DETECT_GITHUB_SESSION',
+            host
+          });
 
           if (!sessionInfo || !sessionInfo.loggedIn) {
-            sendResponse({
-              success: false,
-              needsLogin: true,
-              sessionUser: '',
-              results: [],
-              error: 'Log into GitHub in your browser, then refresh DeveloperTool. Private repos use your browser session.'
+            opened = await findOrOpenGitHubTab(true, host);
+            targetTab = opened.tab;
+            sessionInfo = await sendGitHubTabMessage(targetTab.id, {
+              action: 'DETECT_GITHUB_SESSION',
+              host
             });
-            return;
-          }
-        }
 
-        const sessionUser = sessionInfo.sessionUser || '';
-        const results = [];
-
-        for (const repoItem of repos) {
-          const owner = repoItem.owner;
-          const repo = repoItem.repo;
-          if (!owner || !repo) continue;
-
-          const prResponse = await sendGitHubTabMessage(targetTab.id, {
-            action: 'FETCH_GITHUB_REPO_PRS',
-            owner,
-            repo,
-            enrichDetails: message.enrichDetails !== false
-          });
-
-          if (prResponse && prResponse.needsLogin) {
-            sendResponse({
-              success: false,
-              needsLogin: true,
-              sessionUser,
-              results,
-              error: 'GitHub session expired. Log into GitHub in your browser, then refresh.'
-            });
-            return;
+            if (!sessionInfo || !sessionInfo.loggedIn) {
+              sendResponse({
+                success: false,
+                needsLogin: true,
+                sessionUser: '',
+                results: allResults,
+                githubHost: host,
+                error: `Log into ${host} in your browser, then refresh DeveloperTool. Enterprise GitHub uses that host's session (not github.com).`
+              });
+              return;
+            }
           }
 
-          results.push({
-            owner,
-            repo,
-            error: prResponse && prResponse.error ? prResponse.error : null,
-            pulls: (prResponse && prResponse.pulls) || []
-          });
+          sessionUser = sessionInfo.sessionUser || sessionUser;
+
+          for (const repoItem of byHost[host]) {
+            const owner = repoItem.owner;
+            const repo = repoItem.repo;
+            if (!owner || !repo) continue;
+
+            const prResponse = await sendGitHubTabMessage(targetTab.id, {
+              action: 'FETCH_GITHUB_REPO_PRS',
+              owner,
+              repo,
+              host,
+              origin: repoItem.origin || opened.origin,
+              enrichDetails: message.enrichDetails !== false
+            });
+
+            if (prResponse && prResponse.needsLogin) {
+              sendResponse({
+                success: false,
+                needsLogin: true,
+                sessionUser,
+                results: allResults,
+                githubHost: host,
+                error: `Session expired on ${host}. Log into that GitHub host in your browser, then refresh.`
+              });
+              return;
+            }
+
+            allResults.push({
+              owner,
+              repo,
+              host,
+              error: prResponse && prResponse.error ? prResponse.error : null,
+              pulls: (prResponse && prResponse.pulls) || []
+            });
+          }
         }
 
         sendResponse({
           success: true,
           needsLogin: false,
           sessionUser,
-          results,
+          results: allResults,
+          githubHost: primaryHost,
           source: 'GitHub Session'
         });
       } catch (err) {
@@ -292,6 +334,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           needsLogin: false,
           sessionUser: '',
           results: [],
+          githubHost: message.host || 'github.com',
           error: err.message
         });
       }
@@ -302,7 +345,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'OPEN_GITHUB_LOGIN') {
     (async () => {
       try {
-        await findOrOpenGitHubTab(true);
+        await findOrOpenGitHubTab(true, message.host || 'github.com');
         sendResponse({ success: true });
       } catch (err) {
         sendResponse({ success: false, error: err.message });

@@ -76,6 +76,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   let defaultJiraUrl = '';
   let githubRepos = [];
   let githubToken = '';
+  let githubHost = '';
   let myTicketsOnly = true;
   let staleOnly = false;
   let unresolvedCommentsOnly = false;
@@ -86,12 +87,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     'defaultJiraUrl',
     'myTicketsOnly',
     'githubRepos',
-    'githubToken'
+    'githubToken',
+    'githubHost'
   ]);
 
   if (userConfig.userEmail) userEmail = userConfig.userEmail;
   if (userConfig.defaultJiraUrl) defaultJiraUrl = userConfig.defaultJiraUrl;
   if (typeof userConfig.myTicketsOnly === 'boolean') myTicketsOnly = userConfig.myTicketsOnly;
+  if (userConfig.githubHost) githubHost = userConfig.githubHost;
 
   if (userConfig.githubRepos) {
     if (Array.isArray(userConfig.githubRepos)) {
@@ -164,14 +167,16 @@ document.addEventListener('DOMContentLoaded', async () => {
       }
 
       if (githubRepos.length > 0 && typeof fetchAllGitHubData === 'function') {
-        const ghData = await fetchAllGitHubData(githubRepos, githubToken, userEmail);
+        const ghData = await fetchAllGitHubData(githubRepos, githubToken, userEmail, githubHost || 'github.com');
         githubTickets = ghData.pullRequests || [];
         githubRepoSummaries = ghData.repoSummaries || [];
         detectedSessionUser = ghData.sessionUser || '';
         githubErrors = ghData.errors || [];
+        if (ghData.githubHost) githubHost = ghData.githubHost;
 
         if (ghData.needsLogin && githubErrors.length === 0) {
-          githubErrors = ['Log into GitHub in your browser to access private repositories, then refresh.'];
+          const hostLabel = githubHost || 'GitHub';
+          githubErrors = [`Log into ${hostLabel} in your browser to access private repositories, then refresh.`];
         }
 
         if (!userEmail && detectedSessionUser) {
@@ -507,12 +512,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       let emptyMsg = '<p>No items matched your filter or search query.</p>';
       
       if (currentPlatform === 'github' && githubErrors.length > 0) {
-        const needsLogin = githubErrors.some((e) => /log into github/i.test(e));
+        const needsLogin = githubErrors.some((e) => /log into/i.test(e));
+        const loginHost = githubHost || 'github.com';
         emptyMsg = `
           <div style="color: var(--accent-red, #ef4444); font-size: 12px; max-width: 340px; text-align: center;">
             <p>${escapeHtml(githubErrors.join(' '))}</p>
             <div style="display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin-top: 12px;">
-              ${needsLogin ? '<button id="githubLoginBtn" class="primary-btn">Log in to GitHub</button>' : ''}
+              ${needsLogin ? `<button id="githubLoginBtn" class="primary-btn">Log in to ${escapeHtml(loginHost)}</button>` : ''}
               <button id="errorConfigBtn" class="secondary-btn">Open Settings</button>
             </div>
           </div>
@@ -538,7 +544,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const loginBtn = document.getElementById('githubLoginBtn');
       if (loginBtn) {
         loginBtn.addEventListener('click', async () => {
-          await chrome.runtime.sendMessage({ action: 'OPEN_GITHUB_LOGIN' });
+          await chrome.runtime.sendMessage({
+            action: 'OPEN_GITHUB_LOGIN',
+            host: githubHost || 'github.com'
+          });
         });
       }
 

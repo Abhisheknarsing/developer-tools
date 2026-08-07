@@ -1,16 +1,45 @@
-// DeveloperTool - GitHub client (browser session for private repos, optional PAT fallback)
+// DeveloperTool - GitHub client (github.com + GitHub Enterprise session/token support)
 
-function parseGitHubRepoUrl(urlOrName) {
+function normalizeGitHubHost(hostOrUrl) {
+  if (!hostOrUrl) return 'github.com';
+  let raw = String(hostOrUrl).trim();
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      raw = new URL(raw).hostname;
+    }
+  } catch (e) {
+    // keep raw
+  }
+  return raw.replace(/^www\./i, '').replace(/\/+$/, '').toLowerCase() || 'github.com';
+}
+
+function getGitHubOrigin(host) {
+  const h = normalizeGitHubHost(host);
+  return `https://${h}`;
+}
+
+function getGitHubApiBase(host) {
+  const h = normalizeGitHubHost(host);
+  if (h === 'github.com') return 'https://api.github.com';
+  return `https://${h}/api/v3`;
+}
+
+function parseGitHubRepoUrl(urlOrName, defaultHost = 'github.com') {
   if (!urlOrName) return null;
   let str = urlOrName.trim();
   str = str.split('?')[0].split('#')[0];
+  const fallbackHost = normalizeGitHubHost(defaultHost);
 
   if (str.startsWith('http://') || str.startsWith('https://')) {
     try {
       const u = new URL(str);
+      const host = normalizeGitHubHost(u.hostname);
       const parts = u.pathname.split('/').filter(Boolean);
       if (parts.length >= 2) {
         return {
+          host,
+          origin: getGitHubOrigin(host),
+          apiBase: getGitHubApiBase(host),
           owner: parts[0].trim(),
           repo: parts[1].replace(/\.git$/i, '').trim()
         };
@@ -21,13 +50,26 @@ function parseGitHubRepoUrl(urlOrName) {
   } else {
     const parts = str.split('/').filter(Boolean);
     if (parts.length >= 2) {
+      const host = fallbackHost;
       return {
+        host,
+        origin: getGitHubOrigin(host),
+        apiBase: getGitHubApiBase(host),
         owner: parts[0].trim(),
         repo: parts[1].replace(/\.git$/i, '').trim()
       };
     }
   }
   return null;
+}
+
+function inferGitHubHostFromRepos(repoList = [], configuredHost = '') {
+  if (configuredHost) return normalizeGitHubHost(configuredHost);
+  for (const item of repoList) {
+    const parsed = parseGitHubRepoUrl(item, 'github.com');
+    if (parsed && parsed.host) return parsed.host;
+  }
+  return 'github.com';
 }
 
 function extractJiraTicketKey(title = '', body = '', branch = '') {
@@ -78,13 +120,14 @@ function buildRepoSummaries(pulls, effectiveUser) {
   });
 }
 
-// Attempt to detect logged-in GitHub session user via API token (fallback path)
-async function detectActiveGitHubSessionUser(token = '') {
+// Attempt to detect logged-in GitHub user via API token (fallback path)
+async function detectActiveGitHubSessionUser(token = '', host = 'github.com') {
   try {
+    const apiBase = getGitHubApiBase(host);
     const headers = { Accept: 'application/vnd.github.v3+json' };
     if (token) headers.Authorization = `token ${token}`;
 
-    const resp = await fetch('https://api.github.com/user', {
+    const resp = await fetch(`${apiBase}/user`, {
       headers,
       credentials: 'include'
     });
@@ -101,9 +144,10 @@ async function detectActiveGitHubSessionUser(token = '') {
   return '';
 }
 
-async function fetchPRReviewComments(owner, repo, prNumber, token = '') {
+async function fetchPRReviewComments(owner, repo, prNumber, token = '', host = 'github.com') {
   try {
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/pulls/${prNumber}/comments?sort=created&direction=desc&per_page=5`;
+    const apiBase = getGitHubApiBase(host);
+    const apiUrl = `${apiBase}/repos/${owner}/${repo}/pulls/${prNumber}/comments?sort=created&direction=desc&per_page=5`;
     const headers = { Accept: 'application/vnd.github.v3+json' };
     if (token) headers.Authorization = `token ${token}`;
 
@@ -130,25 +174,27 @@ async function fetchPRReviewComments(owner, repo, prNumber, token = '') {
   return { count: 0, lastComment: null };
 }
 
-async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
+async function fetchGitHubRepoPullRequests(owner, repo, token = '', host = 'github.com') {
   try {
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=100`;
+    const apiBase = getGitHubApiBase(host);
+    const origin = getGitHubOrigin(host);
+    const apiUrl = `${apiBase}/repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=100`;
     const headers = { Accept: 'application/vnd.github.v3+json' };
     if (token) headers.Authorization = `token ${token}`;
 
     const resp = await fetch(apiUrl, { headers, credentials: 'include' });
 
     if (!resp.ok) {
-      console.warn(`[DeveloperTool] GitHub API HTTP ${resp.status} for ${owner}/${repo}`);
+      console.warn(`[DeveloperTool] GitHub API HTTP ${resp.status} for ${owner}/${repo} @ ${host}`);
       if (resp.status === 403 || resp.status === 401) {
         return {
-          error: `Authentication error (HTTP ${resp.status}). Log into GitHub in your browser, or add a Personal Access Token in Settings.`,
+          error: `Authentication error (HTTP ${resp.status}). Log into ${host} in your browser, or add a Personal Access Token in Settings.`,
           pulls: []
         };
       }
       if (resp.status === 404) {
         return {
-          error: `Repository ${owner}/${repo} not found or private. Log into GitHub in your browser (or add a token) for private access.`,
+          error: `Repository ${owner}/${repo} not found or private on ${host}. Log into that GitHub host (or add a token) for private access.`,
           pulls: []
         };
       }
@@ -180,7 +226,7 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
         const branchRef = pr.head ? pr.head.ref : '';
         const linkedJiraKey = extractJiraTicketKey(pr.title, pr.body, branchRef);
 
-        const commentData = await fetchPRReviewComments(owner, repo, pr.number, token);
+        const commentData = await fetchPRReviewComments(owner, repo, pr.number, token, host);
         const hasUnresolvedComments = commentData.count > 0;
 
         const commentAuthor = commentData.lastCommentAuthor || authorLogin || 'Author';
@@ -203,7 +249,7 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
           assignee: assigneesList.join(', ') || authorLogin || 'Unassigned',
           assigneeEmail: authorLogin,
           type: 'Pull Request',
-          url: pr.html_url,
+          url: pr.html_url || `${origin}/${owner}/${repo}/pull/${pr.number}`,
           linkedJiraKey,
           reviewCommentsCount: commentData.count,
           hasUnresolvedComments,
@@ -214,6 +260,7 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
           minutesSinceUpdate: minutesAgo,
           actionRequired,
           isGitHub: true,
+          githubHost: host,
           source: token ? 'token' : 'api'
         };
       })
@@ -226,33 +273,43 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '') {
   }
 }
 
-async function fetchGitHubDataViaBrowserSession(repoList = []) {
+async function fetchGitHubDataViaBrowserSession(repoList = [], defaultHost = 'github.com') {
   if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
     return null;
   }
 
-  const parsedRepos = repoList.map(parseGitHubRepoUrl).filter(Boolean);
+  const hostHint = inferGitHubHostFromRepos(repoList, defaultHost);
+  const parsedRepos = repoList
+    .map((item) => parseGitHubRepoUrl(item, hostHint))
+    .filter(Boolean);
+
   if (parsedRepos.length === 0) {
-    return { pullRequests: [], repoSummaries: [], sessionUser: '', errors: [], needsLogin: false, source: 'session' };
+    return { pullRequests: [], repoSummaries: [], sessionUser: '', errors: [], needsLogin: false, source: 'session', githubHost: hostHint };
   }
 
   try {
     const response = await chrome.runtime.sendMessage({
       action: 'FETCH_GITHUB_VIA_SESSION',
       repos: parsedRepos,
+      host: hostHint,
       enrichDetails: true
     });
 
     if (!response) return null;
 
     if (response.needsLogin) {
+      const host = response.githubHost || hostHint;
       return {
         pullRequests: [],
         repoSummaries: [],
         sessionUser: '',
-        errors: [response.error || 'Log into GitHub in your browser to access private repositories.'],
+        errors: [
+          response.error ||
+            `Log into ${host} in your browser to access private repositories, then refresh.`
+        ],
         needsLogin: true,
-        source: 'session'
+        source: 'session',
+        githubHost: host
       };
     }
 
@@ -263,7 +320,8 @@ async function fetchGitHubDataViaBrowserSession(repoList = []) {
         sessionUser: '',
         errors: [response.error || 'GitHub session fetch failed'],
         needsLogin: false,
-        source: 'session'
+        source: 'session',
+        githubHost: hostHint
       };
     }
 
@@ -289,7 +347,8 @@ async function fetchGitHubDataViaBrowserSession(repoList = []) {
       sessionUser,
       errors: errorList,
       needsLogin: false,
-      source: 'session'
+      source: 'session',
+      githubHost: response.githubHost || hostHint
     };
   } catch (err) {
     console.warn('[DeveloperTool] Browser session GitHub fetch failed:', err);
@@ -297,13 +356,15 @@ async function fetchGitHubDataViaBrowserSession(repoList = []) {
   }
 }
 
-async function fetchAllGitHubData(repoList = [], token = '', userTarget = '') {
+async function fetchAllGitHubData(repoList = [], token = '', userTarget = '', defaultHost = 'github.com') {
   if (!repoList || repoList.length === 0) {
-    return { pullRequests: [], repoSummaries: [], sessionUser: '', errors: [], needsLogin: false, source: '' };
+    return { pullRequests: [], repoSummaries: [], sessionUser: '', errors: [], needsLogin: false, source: '', githubHost: defaultHost };
   }
 
-  // Primary: use the browser GitHub login/session (works for private repos you can access)
-  const sessionData = await fetchGitHubDataViaBrowserSession(repoList);
+  const hostHint = inferGitHubHostFromRepos(repoList, defaultHost);
+
+  // Primary: use the browser GitHub login/session on the correct host (incl. Enterprise)
+  const sessionData = await fetchGitHubDataViaBrowserSession(repoList, hostHint);
 
   if (sessionData) {
     const sessionEmpty =
@@ -326,8 +387,8 @@ async function fetchAllGitHubData(repoList = [], token = '', userTarget = '') {
     }
   }
 
-  // Fallback: official API with optional Personal Access Token
-  const sessionUser = await detectActiveGitHubSessionUser(token);
+  // Fallback: official API with optional Personal Access Token (supports Enterprise /api/v3)
+  const sessionUser = await detectActiveGitHubSessionUser(token, hostHint);
   const effectiveUser = (userTarget || sessionUser || '').toLowerCase().trim();
 
   const repoSummaries = [];
@@ -335,11 +396,11 @@ async function fetchAllGitHubData(repoList = [], token = '', userTarget = '') {
   const errorList = [];
 
   for (const repoItem of repoList) {
-    const parsed = parseGitHubRepoUrl(repoItem);
+    const parsed = parseGitHubRepoUrl(repoItem, hostHint);
     if (!parsed) continue;
 
     const repoFullName = `${parsed.owner}/${parsed.repo}`;
-    const result = await fetchGitHubRepoPullRequests(parsed.owner, parsed.repo, token);
+    const result = await fetchGitHubRepoPullRequests(parsed.owner, parsed.repo, token, parsed.host);
 
     if (result.error) {
       errorList.push(`${repoFullName}: ${result.error}`);
@@ -371,11 +432,12 @@ async function fetchAllGitHubData(repoList = [], token = '', userTarget = '') {
     sessionUser: sessionUser || userTarget,
     errors: errorList,
     needsLogin: false,
-    source: token ? 'token' : 'api'
+    source: token ? 'token' : 'api',
+    githubHost: hostHint
   };
 }
 
-async function fetchAllGitHubItems(repoList = [], token = '') {
-  const data = await fetchAllGitHubData(repoList, token);
+async function fetchAllGitHubItems(repoList = [], token = '', defaultHost = 'github.com') {
+  const data = await fetchAllGitHubData(repoList, token, '', defaultHost);
   return data.pullRequests;
 }

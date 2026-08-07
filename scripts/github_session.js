@@ -1,4 +1,4 @@
-// DeveloperTool - GitHub session access (uses browser login cookies on github.com)
+// DeveloperTool - GitHub session access (github.com + GitHub Enterprise)
 (function () {
   if (window.hasDeveloperToolGitHubSession) return;
   window.hasDeveloperToolGitHubSession = true;
@@ -23,6 +23,28 @@
     return match ? match[1].toUpperCase() : null;
   }
 
+  function getPageOrigin(preferredOrigin) {
+    if (preferredOrigin) {
+      try {
+        return new URL(preferredOrigin).origin;
+      } catch (e) {
+        // fall through
+      }
+    }
+    return window.location.origin;
+  }
+
+  function getPageHost(preferredHost) {
+    if (preferredHost) {
+      return String(preferredHost)
+        .replace(/^https?:\/\//i, '')
+        .replace(/^www\./i, '')
+        .replace(/\/+$/, '')
+        .toLowerCase();
+    }
+    return window.location.hostname.replace(/^www\./i, '').toLowerCase();
+  }
+
   function getSessionUser() {
     const meta = document.querySelector('meta[name="user-login"]');
     const login = meta ? (meta.getAttribute('content') || '').trim() : '';
@@ -40,7 +62,12 @@
   }
 
   function isLoginPage(url = location.href, html = '') {
-    if (/github\.com\/(login|session)/i.test(url)) return true;
+    try {
+      const u = new URL(url, location.origin);
+      if (/\/(login|session)(\/|$)/i.test(u.pathname)) return true;
+    } catch (e) {
+      if (/\/(login|session)(\/|$|\?)/i.test(url)) return true;
+    }
     if (html && /Sign in to GitHub/i.test(html) && !getSessionUser()) return true;
     return false;
   }
@@ -72,7 +99,7 @@
     );
   }
 
-  function parsePullsFromHtml(html, owner, repo) {
+  function parsePullsFromHtml(html, owner, repo, origin) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const pulls = [];
     const seen = new Set();
@@ -129,7 +156,7 @@
         state: 'open',
         user: author,
         assignees: author ? [author] : [],
-        html_url: `https://github.com/${owner}/${repo}/pull/${number}`,
+        html_url: `${origin}/${owner}/${repo}/pull/${number}`,
         updated_at: updatedAt,
         created_at: updatedAt,
         head_ref: '',
@@ -137,7 +164,6 @@
       });
     });
 
-    // Regex fallback if GitHub markup changed
     if (pulls.length === 0) {
       const re = new RegExp(`href="/(?:${owner}/${repo}/pull/(\\d+))"([^>]*)>([^<]+)`, 'gi');
       let m;
@@ -155,7 +181,7 @@
           state: 'open',
           user: '',
           assignees: [],
-          html_url: `https://github.com/${owner}/${repo}/pull/${number}`,
+          html_url: `${origin}/${owner}/${repo}/pull/${number}`,
           updated_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
           head_ref: '',
@@ -167,7 +193,7 @@
     return pulls;
   }
 
-  function parsePullsFromJson(data, owner, repo) {
+  function parsePullsFromJson(data, owner, repo, origin) {
     if (!data || typeof data !== 'object') return [];
 
     const candidates = [];
@@ -207,7 +233,7 @@
         const user =
           (pr.user && (pr.user.login || pr.user)) ||
           pr.author ||
-          (pr.authorLogin) ||
+          pr.authorLogin ||
           '';
         return {
           number,
@@ -219,7 +245,7 @@
           assignees: Array.isArray(pr.assignees)
             ? pr.assignees.map((a) => (typeof a === 'string' ? a : a.login)).filter(Boolean)
             : [],
-          html_url: pr.html_url || `https://github.com/${owner}/${repo}/pull/${number}`,
+          html_url: pr.html_url || `${origin}/${owner}/${repo}/pull/${number}`,
           updated_at: pr.updated_at || pr.updatedAt || pr.created_at || new Date().toISOString(),
           created_at: pr.created_at || pr.createdAt || pr.updated_at || new Date().toISOString(),
           head_ref: (pr.head && pr.head.ref) || pr.headRefName || '',
@@ -229,9 +255,9 @@
       .filter(Boolean);
   }
 
-  async function fetchPullDetailSnippet(owner, repo, number) {
+  async function fetchPullDetailSnippet(owner, repo, number, origin) {
     try {
-      const resp = await githubFetch(`https://github.com/${owner}/${repo}/pull/${number}`);
+      const resp = await githubFetch(`${origin}/${owner}/${repo}/pull/${number}`);
       if (!resp.ok) return null;
       const html = await resp.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -252,7 +278,7 @@
       let lastCommentAuthor = '';
       let lastCommentText = '';
       let lastCommentDate = null;
-      let count = commentNodes.length;
+      const count = commentNodes.length;
 
       if (commentNodes.length > 0) {
         const last = commentNodes[commentNodes.length - 1];
@@ -282,7 +308,7 @@
     }
   }
 
-  function formatPull(owner, repo, pr, detail) {
+  function formatPull(owner, repo, pr, detail, origin, host) {
     const updatedAt = (detail && detail.lastCommentDate) || pr.updated_at || pr.created_at;
     const hoursAgo = calculateHoursAgo(updatedAt);
     const minutesAgo = calculateMinutesAgo(updatedAt);
@@ -297,9 +323,6 @@
 
     const authorLogin = pr.user || '';
     const assigneesList = Array.isArray(pr.assignees) ? [...pr.assignees] : [];
-    if (authorLogin && !assigneesList.includes(authorLogin)) {
-      // keep assignee list as-is; author tracked separately
-    }
 
     const branchRef = (detail && detail.head_ref) || pr.head_ref || '';
     const body = (detail && detail.body) || pr.body || '';
@@ -313,7 +336,7 @@
       (body ? truncate(body) : 'Pull Request Open');
 
     return {
-      id: `pr-${owner}-${repo}-${pr.number}`,
+      id: `pr-${host}-${owner}-${repo}-${pr.number}`,
       key: `#${pr.number}`,
       repo: `${owner}/${repo}`,
       summary: pr.title,
@@ -323,7 +346,7 @@
       assignee: assigneesList.join(', ') || authorLogin || 'Unassigned',
       assigneeEmail: authorLogin,
       type: 'Pull Request',
-      url: pr.html_url || `https://github.com/${owner}/${repo}/pull/${pr.number}`,
+      url: pr.html_url || `${origin}/${owner}/${repo}/pull/${pr.number}`,
       linkedJiraKey,
       reviewCommentsCount: commentCount,
       hasUnresolvedComments,
@@ -334,14 +357,14 @@
       minutesSinceUpdate: minutesAgo,
       actionRequired,
       isGitHub: true,
+      githubHost: host,
       source: 'session'
     };
   }
 
-  async function fetchRepoPullRequests(owner, repo, enrichDetails = true) {
-    const listUrl = `https://github.com/${owner}/${repo}/pulls?q=is%3Aopen+is%3Apr`;
+  async function fetchRepoPullRequests(owner, repo, origin, host, enrichDetails = true) {
+    const listUrl = `${origin}/${owner}/${repo}/pulls?q=is%3Aopen+is%3Apr`;
 
-    // Prefer HTML (stable with session cookies). Also try JSON soft-nav payload.
     let pulls = [];
     let fetchError = null;
 
@@ -352,7 +375,7 @@
       }
       if (jsonResp.status === 404) {
         return {
-          error: `Repository ${owner}/${repo} not found or you do not have access with your GitHub session.`,
+          error: `Repository ${owner}/${repo} not found on ${host}, or you do not have access with this session.`,
           pulls: []
         };
       }
@@ -360,13 +383,13 @@
         const contentType = jsonResp.headers.get('content-type') || '';
         if (contentType.includes('application/json')) {
           const data = await jsonResp.json();
-          pulls = parsePullsFromJson(data, owner, repo);
+          pulls = parsePullsFromJson(data, owner, repo, origin);
         } else {
           const html = await jsonResp.text();
           if (isLoginPage(jsonResp.url, html)) {
             return { error: 'not_logged_in', pulls: [] };
           }
-          pulls = parsePullsFromHtml(html, owner, repo);
+          pulls = parsePullsFromHtml(html, owner, repo, origin);
         }
       }
     } catch (e) {
@@ -381,7 +404,7 @@
         }
         if (htmlResp.status === 404) {
           return {
-            error: `Repository ${owner}/${repo} not found or you do not have access with your GitHub session.`,
+            error: `Repository ${owner}/${repo} not found on ${host}, or you do not have access with this session.`,
             pulls: []
           };
         }
@@ -395,36 +418,40 @@
         if (isLoginPage(htmlResp.url, html) || (!getSessionUser() && /Sign in/i.test(html))) {
           return { error: 'not_logged_in', pulls: [] };
         }
-        pulls = parsePullsFromHtml(html, owner, repo);
+        pulls = parsePullsFromHtml(html, owner, repo, origin);
       } catch (e) {
         return { error: e.message || fetchError || 'Failed to fetch pull requests', pulls: [] };
       }
     }
 
-    // Enrich a limited number of PRs with branch/body/comments (keeps popup responsive)
     const toEnrich = enrichDetails ? pulls.slice(0, 15) : [];
     const detailsByNumber = {};
     await Promise.all(
       toEnrich.map(async (pr) => {
-        const detail = await fetchPullDetailSnippet(owner, repo, pr.number);
+        const detail = await fetchPullDetailSnippet(owner, repo, pr.number, origin);
         if (detail) detailsByNumber[pr.number] = detail;
       })
     );
 
-    const formatted = pulls.map((pr) => formatPull(owner, repo, pr, detailsByNumber[pr.number]));
+    const formatted = pulls.map((pr) =>
+      formatPull(owner, repo, pr, detailsByNumber[pr.number], origin, host)
+    );
     return { pulls: formatted, error: null };
   }
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === 'DETECT_GITHUB_SESSION') {
       const sessionUser = getSessionUser();
-      const onGitHub = /https?:\/\/(www\.)?github\.com/i.test(location.href);
+      const host = getPageHost(message.host);
+      const onExpectedHost =
+        !message.host || getPageHost() === getPageHost(message.host);
       sendResponse({
         success: true,
         loggedIn: !!sessionUser,
         sessionUser,
-        onGitHub,
-        needsLogin: onGitHub && !sessionUser && isLoginPage()
+        host,
+        onGitHub: onExpectedHost,
+        needsLogin: onExpectedHost && !sessionUser && isLoginPage()
       });
       return false;
     }
@@ -445,12 +472,21 @@
 
           const owner = message.owner;
           const repo = message.repo;
+          const origin = getPageOrigin(message.origin);
+          const host = getPageHost(message.host || origin);
+
           if (!owner || !repo) {
             sendResponse({ success: false, error: 'Missing owner/repo', pulls: [] });
             return;
           }
 
-          const result = await fetchRepoPullRequests(owner, repo, message.enrichDetails !== false);
+          const result = await fetchRepoPullRequests(
+            owner,
+            repo,
+            origin,
+            host,
+            message.enrichDetails !== false
+          );
           if (result.error === 'not_logged_in') {
             sendResponse({
               success: false,
@@ -466,6 +502,7 @@
             success: !result.error,
             error: result.error || null,
             sessionUser,
+            host,
             pulls: result.pulls || []
           });
         } catch (err) {
