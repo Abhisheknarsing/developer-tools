@@ -96,6 +96,7 @@ body {
   -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   z-index: 10;
+  flex: 0 0 auto;
 }
 
 .brand {
@@ -265,40 +266,47 @@ body {
 .stat-card.done .stat-value { color: var(--accent-emerald); }
 .stat-card.action-needed .stat-value { color: var(--accent-red); }
 
-/* Quick Actions */
+/* Quick Actions — fills remaining popup height below header */
 .quick-actions-section {
   display: flex;
   flex-direction: column;
   gap: 0;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 .qa-stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 10px;
-  padding: 14px 20px;
+  padding: 12px 20px;
   background: rgba(255, 255, 255, 0.4);
   border-bottom: 1px solid rgba(15, 23, 42, 0.16);
+  flex: 0 0 auto;
 }
 
 .qa-row {
-  padding: 14px 20px 12px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  padding: 10px 20px 8px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.16);
+  overflow: hidden;
 }
 
 .qa-row:last-child {
   border-bottom: none;
-  padding-bottom: 16px;
+  padding-bottom: 12px;
 }
 
 .qa-row-header {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  flex: 0 0 auto;
 }
 
 .qa-row-title {
@@ -325,11 +333,13 @@ body {
 .qa-row-list {
   display: flex;
   flex-direction: row;
+  align-items: stretch;
   gap: 10px;
-  min-height: 72px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 2px 2px 10px;
+  padding: 2px 2px 8px;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
@@ -368,7 +378,9 @@ body {
   transition: var(--transition-fast);
   cursor: pointer;
   scroll-snap-align: start;
-  min-height: 68px;
+  min-height: 64px;
+  height: 100%;
+  max-height: 96px;
   box-sizing: border-box;
 }
 
@@ -933,6 +945,7 @@ body {
   border-top: 1px solid var(--border-color);
   font-size: 11px;
   color: var(--text-muted);
+  flex: 0 0 auto;
 }
 
 .user-label, .source-badge, .board-title-label {

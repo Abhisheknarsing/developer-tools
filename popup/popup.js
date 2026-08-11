@@ -51,6 +51,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const viewListBtn = document.getElementById('viewListBtn');
   const exportBtn = document.getElementById('exportBtn');
 
+  const mainContainer = document.getElementById('mainContainer');
   const welcomeState = document.getElementById('welcomeState');
   const loadingState = document.getElementById('loadingState');
   const loadingMsg = document.getElementById('loadingMsg');
@@ -344,6 +345,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (statsSection) statsSection.classList.add('hidden');
     if (toolbarSection) toolbarSection.classList.add('hidden');
     if (githubRepoOverview) githubRepoOverview.classList.add('hidden');
+    // Main holds welcome/loading/tickets — not used on Quick Actions; hide so QA can fill height
+    if (mainContainer) mainContainer.classList.add('hidden');
     if (refreshBtn) refreshBtn.classList.remove('spinning');
 
     if (quickActionsSection) quickActionsSection.classList.remove('hidden');
@@ -415,6 +418,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     if (quickActionsSection) quickActionsSection.classList.add('hidden');
+    // Jira / GitHub use main for ticket boards
+    if (mainContainer) mainContainer.classList.remove('hidden');
 
     const tickets = isGH ? githubTickets : jiraTickets;
 
@@ -547,6 +552,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (quickActionsSection) quickActionsSection.classList.add('hidden');
     if (statsSection) statsSection.classList.add('hidden');
     if (toolbarSection) toolbarSection.classList.add('hidden');
+    if (mainContainer) mainContainer.classList.remove('hidden');
 
     if (loadingMsg) loadingMsg.innerText = msg;
     if (loadingState) loadingState.classList.remove('hidden');
@@ -556,8 +562,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (welcomeState) welcomeState.classList.add('hidden');
     if (loadingState) loadingState.classList.add('hidden');
     if (ticketsContainer) ticketsContainer.classList.add('hidden');
+    if (quickActionsSection) quickActionsSection.classList.add('hidden');
     if (statsSection) statsSection.classList.add('hidden');
     if (toolbarSection) toolbarSection.classList.add('hidden');
+    if (mainContainer) mainContainer.classList.remove('hidden');
 
     if (errorTitle) errorTitle.innerText = title;
     if (errorMsg) errorMsg.innerText = msg;
