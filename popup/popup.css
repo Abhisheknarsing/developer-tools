@@ -290,35 +290,50 @@ body {
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
-  min-height: 0;
-  padding: 10px 20px 8px;
+  min-height: 108px;
+  padding: 10px 20px 6px;
   border-bottom: 1px solid rgba(15, 23, 42, 0.16);
   overflow: hidden;
 }
 
 .qa-row:last-child {
   border-bottom: none;
-  padding-bottom: 12px;
+  padding-bottom: 10px;
 }
 
 .qa-row-header {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 8px;
   flex: 0 0 auto;
+}
+
+.qa-row-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
 }
 
 .qa-row-title {
   font-size: 13px;
   font-weight: 700;
   color: var(--text-primary);
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .qa-row-sub {
   font-size: 11px;
   color: var(--text-muted);
-  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 
 .qa-row-count {
@@ -328,48 +343,53 @@ body {
   background: rgba(37, 99, 235, 0.08);
   border-radius: 999px;
   padding: 2px 8px;
+  flex: 0 0 auto;
 }
 
 .qa-row-list {
   display: flex;
   flex-direction: row;
-  align-items: stretch;
+  align-items: flex-start;
   gap: 10px;
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 0 auto;
+  height: 86px;
   overflow-x: auto;
   overflow-y: hidden;
-  padding: 2px 2px 8px;
+  padding: 0 0 10px;
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: thin;
+  scrollbar-gutter: stable;
 }
 
 .qa-row-list::-webkit-scrollbar {
-  height: 6px;
+  height: 5px;
 }
 
 .qa-row-list::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.18);
   border-radius: 999px;
 }
 
 .qa-empty {
   font-size: 12px;
   color: var(--text-muted);
-  padding: 10px 0;
+  padding: 18px 0;
   flex: 1;
+  align-self: center;
 }
 
 .qa-item {
   /* ~4 cards visible in the popup width */
   flex: 0 0 calc((100% - 30px) / 4);
+  width: calc((100% - 30px) / 4);
   max-width: calc((100% - 30px) / 4);
-  min-width: 110px;
+  min-width: 118px;
+  height: 72px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 10px;
+  gap: 5px;
+  padding: 10px 11px;
   background: var(--bg-surface-solid);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
@@ -378,10 +398,8 @@ body {
   transition: var(--transition-fast);
   cursor: pointer;
   scroll-snap-align: start;
-  min-height: 64px;
-  height: 100%;
-  max-height: 96px;
   box-sizing: border-box;
+  overflow: hidden;
 }
 
 .qa-item:hover {
@@ -397,17 +415,23 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 0 0 auto;
+  line-height: 1.2;
 }
 
 .qa-item-summary {
   font-size: 12px;
   font-weight: 500;
   color: var(--text-primary);
-  line-height: 1.35;
+  line-height: 1.3;
+  flex: 1 1 auto;
+  min-height: 0;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .stat-label {
