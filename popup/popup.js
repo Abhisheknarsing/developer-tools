@@ -20,8 +20,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const platformSwitch = document.getElementById('platformSwitch');
+  const quickTabBtn = document.getElementById('quickTabBtn');
   const jiraTabBtn = document.getElementById('jiraTabBtn');
   const githubTabBtn = document.getElementById('githubTabBtn');
+  const quickActionsSection = document.getElementById('quickActionsSection');
 
   const statsSection = document.getElementById('statsSection');
   const statTotal = document.getElementById('statTotal');
@@ -63,8 +65,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const boardTitleLabel = document.getElementById('boardTitleLabel');
 
   // State Variables
-  let currentPlatform = 'jira'; // 'jira' | 'github'
+  let currentPlatform = 'quick'; // 'quick' | 'jira' | 'github'
   let jiraTickets = [];
+  let myJiraTickets = []; // Always My Items — source for Quick Actions
   let jiraAssigneeFilterApplied = false;
   let githubTickets = [];
   let githubRepoSummaries = [];
@@ -107,9 +110,15 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   updateUserUI();
 
-  // Show platform switcher if GitHub repos are configured
-  if (githubRepos.length > 0) {
+  // Show platform switcher when any source is configured
+  if (defaultJiraUrl || githubRepos.length > 0) {
     platformSwitch.classList.remove('hidden');
+  }
+  if (!githubRepos.length && githubTabBtn) {
+    githubTabBtn.classList.add('hidden');
+  }
+  if (!defaultJiraUrl && jiraTabBtn) {
+    jiraTabBtn.classList.add('hidden');
   }
 
   // Open Options Webpage on Settings Click
@@ -124,23 +133,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  // Platform Switcher Listeners
-  if (jiraTabBtn) {
-    jiraTabBtn.addEventListener('click', () => {
-      currentPlatform = 'jira';
-      jiraTabBtn.classList.add('active');
-      githubTabBtn.classList.remove('active');
-      renderPlatformData();
-    });
+  function setActivePlatformTab(platform) {
+    currentPlatform = platform;
+    if (quickTabBtn) quickTabBtn.classList.toggle('active', platform === 'quick');
+    if (jiraTabBtn) jiraTabBtn.classList.toggle('active', platform === 'jira');
+    if (githubTabBtn) githubTabBtn.classList.toggle('active', platform === 'github');
+    renderPlatformData();
   }
 
+  // Platform Switcher Listeners
+  if (quickTabBtn) {
+    quickTabBtn.addEventListener('click', () => setActivePlatformTab('quick'));
+  }
+  if (jiraTabBtn) {
+    jiraTabBtn.addEventListener('click', () => setActivePlatformTab('jira'));
+  }
   if (githubTabBtn) {
-    githubTabBtn.addEventListener('click', () => {
-      currentPlatform = 'github';
-      githubTabBtn.classList.add('active');
-      jiraTabBtn.classList.remove('active');
-      renderPlatformData();
-    });
+    githubTabBtn.addEventListener('click', () => setActivePlatformTab('github'));
   }
 
   // Initial Fetch
@@ -152,17 +161,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     showLoading('Fetching tickets & activity...');
     try {
       if (defaultJiraUrl) {
-        const resp = await chrome.runtime.sendMessage({
+        // Always fetch My Items for Quick Actions
+        const myResp = await chrome.runtime.sendMessage({
           action: 'OPEN_AND_READ_BOARD',
           url: defaultJiraUrl,
-          myTicketsOnly,
+          myTicketsOnly: true,
           userIdentity: userEmail || ''
         });
-        if (resp && resp.success) {
-          jiraTickets = resp.tickets || [];
-          jiraAssigneeFilterApplied = !!resp.assigneeFilterApplied;
-          sourceBadge.innerText = `Source: ${resp.source || 'Jira'}`;
-          boardTitleLabel.innerText = resp.boardTitle || 'Jira Board';
+        if (myResp && myResp.success) {
+          myJiraTickets = myResp.tickets || [];
+          boardTitleLabel.innerText = myResp.boardTitle || 'Jira Board';
+        }
+
+        if (myTicketsOnly) {
+          jiraTickets = myJiraTickets;
+          jiraAssigneeFilterApplied = !!(myResp && myResp.assigneeFilterApplied);
+          sourceBadge.innerText = `Source: ${(myResp && myResp.source) || 'Jira'}`;
+        } else {
+          const allResp = await chrome.runtime.sendMessage({
+            action: 'OPEN_AND_READ_BOARD',
+            url: defaultJiraUrl,
+            myTicketsOnly: false,
+            userIdentity: userEmail || ''
+          });
+          if (allResp && allResp.success) {
+            jiraTickets = allResp.tickets || [];
+            jiraAssigneeFilterApplied = !!allResp.assigneeFilterApplied;
+            sourceBadge.innerText = `Source: ${allResp.source || 'Jira'}`;
+            boardTitleLabel.innerText = allResp.boardTitle || boardTitleLabel.innerText || 'Jira Board';
+          }
         }
       }
 
@@ -191,8 +218,219 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   }
 
+  function isJiraInProgressStatus(status) {
+    const s = (status || '').toLowerCase();
+    if (s.includes('ready for test')) return false;
+    return s.includes('in progress') || s.includes('in review') || s.includes('dev');
+  }
+
+  function isJiraReadyForTestingStatus(status) {
+    const s = (status || '').toLowerCase();
+    return s.includes('ready for testing') || s.includes('ready for test') || s === 'testing';
+  }
+
+  function isJiraDoneStatus(status) {
+    const s = (status || '').toLowerCase();
+    return s.includes('done') || s.includes('closed') || s.includes('resolved') || s.includes('complete') || s.includes('merged');
+  }
+
+  function isCommentFromCurrentUser(author) {
+    const activeUser = (userEmail || detectedSessionUser || '').toLowerCase().trim();
+    if (!activeUser || !author) return false;
+    const a = author.toLowerCase().trim();
+    if (a === activeUser) return true;
+    if (a.includes(activeUser) || activeUser.includes(a)) return true;
+    const userPart = activeUser.split('@')[0];
+    if (userPart && (a === userPart || a.includes(userPart))) return true;
+    return false;
+  }
+
+  function buildQuickActionsData() {
+    const mine = Array.isArray(myJiraTickets) ? myJiraTickets : [];
+
+    const staleTickets = mine.filter((t) => !isJiraDoneStatus(t.status) && t.actionRequired);
+
+    // Same In Progress definition as Jira My Items stats
+    const inProgressTickets = mine.filter((t) => {
+      const s = (t.status || '').toLowerCase();
+      return s.includes('in progress') || s.includes('in review') || s.includes('dev') || s.includes('testing');
+    });
+
+    // Open Comments: only In Progress tickets (not Ready For Testing)
+    const openCommentInProgress = mine.filter((t) => isJiraInProgressStatus(t.status));
+
+    const prsWithOpenComments = [];
+    let openCommentsCount = 0;
+    openCommentInProgress.forEach((ticket) => {
+      const key = (ticket.key || '').toUpperCase();
+      if (!key) return;
+      const linkedPrs = githubTickets.filter((pr) => {
+        const linked = (pr.linkedJiraKey || '').toUpperCase();
+        return linked && linked === key && (pr.hasUnansweredReviewComments || (pr.unansweredReviewCommentsCount || 0) > 0);
+      });
+      linkedPrs.forEach((pr) => {
+        if (!prsWithOpenComments.some((p) => p.id === pr.id || (p.url && p.url === pr.url))) {
+          prsWithOpenComments.push({
+            ...pr,
+            linkedTicketKey: ticket.key,
+            linkedTicketSummary: ticket.summary
+          });
+          openCommentsCount += pr.unansweredReviewCommentsCount || 1;
+        }
+      });
+    });
+
+    const testerTickets = mine.filter((t) => {
+      if (!isJiraReadyForTestingStatus(t.status)) return false;
+      if (!t.lastCommentText && !t.lastCommentAuthor) return false;
+      // Latest comment from current user = already replied — skip
+      if (isCommentFromCurrentUser(t.lastCommentAuthor)) return false;
+      return true;
+    });
+
+    return {
+      actionNeededCount: staleTickets.length,
+      inProgressCount: inProgressTickets.length,
+      openCommentsCount,
+      testerCommentsCount: testerTickets.length,
+      staleTickets,
+      prsWithOpenComments,
+      testerTickets
+    };
+  }
+
+  function renderQaItemList(container, items, emptyText, mapper) {
+    if (!container) return;
+    container.innerHTML = '';
+    if (!items || items.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'qa-empty';
+      empty.textContent = emptyText;
+      container.appendChild(empty);
+      return;
+    }
+    items.forEach((item) => {
+      container.appendChild(mapper(item));
+    });
+  }
+
+  function createQaLinkItem({ key, meta, summary, comment, url }) {
+    const el = document.createElement(url ? 'a' : 'div');
+    el.className = 'qa-item';
+    if (url) {
+      el.href = url;
+      el.target = '_blank';
+      el.rel = 'noopener noreferrer';
+    }
+    el.innerHTML = `
+      <div class="qa-item-top">
+        <span class="qa-item-key">${escapeHtml(key || '')}</span>
+        <span class="qa-item-meta">${escapeHtml(meta || '')}</span>
+      </div>
+      <div class="qa-item-summary">${escapeHtml(summary || '')}</div>
+      ${comment ? `<div class="qa-item-comment">${escapeHtml(comment)}</div>` : ''}
+    `;
+    if (url) {
+      el.addEventListener('click', (e) => {
+        e.preventDefault();
+        window.open(url, '_blank');
+      });
+    }
+    return el;
+  }
+
+  function renderQuickActions() {
+    if (loadingState) loadingState.classList.add('hidden');
+    if (welcomeState) welcomeState.classList.add('hidden');
+    if (errorState) errorState.classList.add('hidden');
+    if (ticketsContainer) ticketsContainer.classList.add('hidden');
+    if (statsSection) statsSection.classList.add('hidden');
+    if (toolbarSection) toolbarSection.classList.add('hidden');
+    if (githubRepoOverview) githubRepoOverview.classList.add('hidden');
+    if (refreshBtn) refreshBtn.classList.remove('spinning');
+
+    if (quickActionsSection) quickActionsSection.classList.remove('hidden');
+
+    const data = buildQuickActionsData();
+
+    const qaStatActionNeeded = document.getElementById('qaStatActionNeeded');
+    const qaStatInProgress = document.getElementById('qaStatInProgress');
+    const qaStatOpenComments = document.getElementById('qaStatOpenComments');
+    const qaStatTesterComments = document.getElementById('qaStatTesterComments');
+    const qaStaleCount = document.getElementById('qaStaleCount');
+    const qaPrCommentsCount = document.getElementById('qaPrCommentsCount');
+    const qaTesterCount = document.getElementById('qaTesterCount');
+
+    if (qaStatActionNeeded) qaStatActionNeeded.innerText = data.actionNeededCount;
+    if (qaStatInProgress) qaStatInProgress.innerText = data.inProgressCount;
+    if (qaStatOpenComments) qaStatOpenComments.innerText = data.openCommentsCount;
+    if (qaStatTesterComments) qaStatTesterComments.innerText = data.testerCommentsCount;
+    if (qaStaleCount) qaStaleCount.innerText = data.staleTickets.length;
+    if (qaPrCommentsCount) qaPrCommentsCount.innerText = data.prsWithOpenComments.length;
+    if (qaTesterCount) qaTesterCount.innerText = data.testerTickets.length;
+
+    renderQaItemList(
+      document.getElementById('qaStaleList'),
+      data.staleTickets,
+      'No stale My Items right now.',
+      (t) =>
+        createQaLinkItem({
+          key: t.key,
+          meta: `${t.status || ''} · ${t.hoursSinceUpdate || 24}h`,
+          summary: t.summary,
+          comment: t.lastCommentText
+            ? `${t.lastCommentAuthor || 'User'}: ${t.lastCommentText}`
+            : '',
+          url: t.url
+        })
+    );
+
+    renderQaItemList(
+      document.getElementById('qaPrCommentsList'),
+      data.prsWithOpenComments,
+      'No unanswered PR review comments on In Progress tickets.',
+      (pr) =>
+        createQaLinkItem({
+          key: `${pr.linkedTicketKey || ''} ${pr.key || ''}`.trim(),
+          meta: pr.repo || '',
+          summary: pr.summary,
+          comment: pr.lastCommentText
+            ? `${pr.lastCommentAuthor || 'Reviewer'}: ${pr.lastCommentText}`
+            : 'Unanswered review comments',
+          url: pr.url
+        })
+    );
+
+    renderQaItemList(
+      document.getElementById('qaTesterList'),
+      data.testerTickets,
+      'No tester comments waiting on Ready For Testing items.',
+      (t) =>
+        createQaLinkItem({
+          key: t.key,
+          meta: t.status || 'Ready For Testing',
+          summary: t.summary,
+          comment: t.lastCommentText
+            ? `${t.lastCommentAuthor || 'Tester'}: ${t.lastCommentText}`
+            : '',
+          url: t.url
+        })
+    );
+
+    if (sourceBadge) sourceBadge.innerText = 'Source: Quick Actions (My Items)';
+  }
+
   function renderPlatformData() {
+    const isQuick = currentPlatform === 'quick';
     const isGH = currentPlatform === 'github';
+
+    if (isQuick) {
+      renderQuickActions();
+      return;
+    }
+
+    if (quickActionsSection) quickActionsSection.classList.add('hidden');
+
     const tickets = isGH ? githubTickets : jiraTickets;
 
     // Update stat card labels for GitHub vs Jira
@@ -249,20 +487,37 @@ document.addEventListener('DOMContentLoaded', async () => {
       await chrome.storage.local.set({ myTicketsOnly });
       updateUserUI();
       // Re-fetch Jira with assignee JQL so My Items is exact (not fuzzy client filter)
-      if (currentPlatform === 'jira' && defaultJiraUrl) {
+      if ((currentPlatform === 'jira' || currentPlatform === 'quick') && defaultJiraUrl) {
         showLoading(myTicketsOnly ? 'Filtering your Jira tickets...' : 'Loading all Jira tickets...');
         try {
-          const resp = await chrome.runtime.sendMessage({
+          // Keep My Items cache fresh for Quick Actions
+          const myResp = await chrome.runtime.sendMessage({
             action: 'OPEN_AND_READ_BOARD',
             url: defaultJiraUrl,
-            myTicketsOnly,
+            myTicketsOnly: true,
             userIdentity: userEmail || ''
           });
-          if (resp && resp.success) {
-            jiraTickets = resp.tickets || [];
-            jiraAssigneeFilterApplied = !!resp.assigneeFilterApplied;
-            sourceBadge.innerText = `Source: ${resp.source || 'Jira'}`;
-            boardTitleLabel.innerText = resp.boardTitle || 'Jira Board';
+          if (myResp && myResp.success) {
+            myJiraTickets = myResp.tickets || [];
+          }
+
+          if (myTicketsOnly) {
+            jiraTickets = myJiraTickets;
+            jiraAssigneeFilterApplied = !!(myResp && myResp.assigneeFilterApplied);
+            sourceBadge.innerText = `Source: ${(myResp && myResp.source) || 'Jira'}`;
+          } else {
+            const resp = await chrome.runtime.sendMessage({
+              action: 'OPEN_AND_READ_BOARD',
+              url: defaultJiraUrl,
+              myTicketsOnly: false,
+              userIdentity: userEmail || ''
+            });
+            if (resp && resp.success) {
+              jiraTickets = resp.tickets || [];
+              jiraAssigneeFilterApplied = !!resp.assigneeFilterApplied;
+              sourceBadge.innerText = `Source: ${resp.source || 'Jira'}`;
+              boardTitleLabel.innerText = resp.boardTitle || 'Jira Board';
+            }
           }
         } catch (err) {
           console.warn('[DeveloperTool] Jira re-fetch on My Items toggle failed:', err);
@@ -304,6 +559,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (welcomeState) welcomeState.classList.add('hidden');
     if (errorState) errorState.classList.add('hidden');
     if (ticketsContainer) ticketsContainer.classList.add('hidden');
+    if (quickActionsSection) quickActionsSection.classList.add('hidden');
+    if (statsSection) statsSection.classList.add('hidden');
+    if (toolbarSection) toolbarSection.classList.add('hidden');
 
     if (loadingMsg) loadingMsg.innerText = msg;
     if (loadingState) loadingState.classList.remove('hidden');
@@ -442,7 +700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   function matchesUserAssignee(ticket, userTarget) {
-    if (currentPlatform === 'jira') {
+    if (currentPlatform === 'jira' || currentPlatform === 'quick') {
       return matchesJiraAssigneeExact(ticket, userTarget);
     }
     return matchesGitHubUser(ticket, userTarget);

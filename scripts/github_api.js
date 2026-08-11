@@ -144,34 +144,87 @@ async function detectActiveGitHubSessionUser(token = '', host = 'github.com') {
   return '';
 }
 
-async function fetchPRReviewComments(owner, repo, prNumber, token = '', host = 'github.com') {
+function analyzeUnansweredReviewComments(comments = [], prAuthorLogin = '') {
+  if (!Array.isArray(comments) || comments.length === 0) {
+    return { unansweredCount: 0, lastCommentAuthor: '', lastCommentText: '', lastCommentDate: null };
+  }
+
+  const sortedDesc = [...comments].sort(
+    (a, b) => new Date(b.created_at || b.updated_at || 0) - new Date(a.created_at || a.updated_at || 0)
+  );
+  const last = sortedDesc[0];
+  const lastCommentAuthor = last.user ? last.user.login : '';
+  const lastCommentText = last.body
+    ? last.body.length > 90
+      ? last.body.substring(0, 90) + '...'
+      : last.body
+    : '';
+  const lastCommentDate = last.updated_at || last.created_at;
+
+  const childrenByParent = new Map();
+  comments.forEach((c) => {
+    if (c.in_reply_to_id) {
+      if (!childrenByParent.has(c.in_reply_to_id)) childrenByParent.set(c.in_reply_to_id, []);
+      childrenByParent.get(c.in_reply_to_id).push(c);
+    }
+  });
+
+  const roots = comments.filter((c) => !c.in_reply_to_id);
+  const author = (prAuthorLogin || '').toLowerCase();
+  let unansweredCount = 0;
+
+  roots.forEach((root) => {
+    const replies = (childrenByParent.get(root.id) || []).sort(
+      (a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0)
+    );
+    const latest = replies.length ? replies[replies.length - 1] : root;
+    const latestAuthor = ((latest.user && latest.user.login) || '').toLowerCase();
+    // Unanswered = latest voice in the thread is not the PR author
+    if (latestAuthor && author && latestAuthor !== author) {
+      unansweredCount += 1;
+    } else if (!author && replies.length === 0) {
+      unansweredCount += 1;
+    }
+  });
+
+  // Fallback when API omits in_reply_to_id: treat latest non-author comment as open
+  if (unansweredCount === 0 && author && lastCommentAuthor && lastCommentAuthor.toLowerCase() !== author) {
+    unansweredCount = 1;
+  }
+
+  return {
+    unansweredCount,
+    lastCommentAuthor,
+    lastCommentText,
+    lastCommentDate
+  };
+}
+
+async function fetchPRReviewComments(owner, repo, prNumber, token = '', host = 'github.com', prAuthorLogin = '') {
   try {
     const apiBase = getGitHubApiBase(host);
-    const apiUrl = `${apiBase}/repos/${owner}/${repo}/pulls/${prNumber}/comments?sort=created&direction=desc&per_page=5`;
+    const apiUrl = `${apiBase}/repos/${owner}/${repo}/pulls/${prNumber}/comments?sort=created&direction=desc&per_page=100`;
     const headers = { Accept: 'application/vnd.github.v3+json' };
     if (token) headers.Authorization = `token ${token}`;
 
     const resp = await fetch(apiUrl, { headers, credentials: 'include' });
-    if (!resp.ok) return { count: 0, lastComment: null };
+    if (!resp.ok) return { count: 0, unansweredCount: 0, lastComment: null };
 
     const comments = await resp.json();
     if (comments && comments.length > 0) {
-      const last = comments[0];
+      const analysis = analyzeUnansweredReviewComments(comments, prAuthorLogin);
       return {
         count: comments.length,
-        lastCommentAuthor: last.user ? last.user.login : '',
-        lastCommentText: last.body
-          ? last.body.length > 90
-            ? last.body.substring(0, 90) + '...'
-            : last.body
-          : '',
-        lastCommentDate: last.updated_at || last.created_at
+        unansweredCount: analysis.unansweredCount,
+        lastCommentAuthor: analysis.lastCommentAuthor,
+        lastCommentText: analysis.lastCommentText,
+        lastCommentDate: analysis.lastCommentDate
       };
     }
   } catch (e) {
     console.warn(`[DeveloperTool] Could not fetch comments for PR #${prNumber}:`, e);
   }
-  return { count: 0, lastComment: null };
+  return { count: 0, unansweredCount: 0, lastComment: null };
 }
 
 async function fetchGitHubRepoPullRequests(owner, repo, token = '', host = 'github.com') {
@@ -226,8 +279,10 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '', host = 'gith
         const branchRef = pr.head ? pr.head.ref : '';
         const linkedJiraKey = extractJiraTicketKey(pr.title, pr.body, branchRef);
 
-        const commentData = await fetchPRReviewComments(owner, repo, pr.number, token, host);
-        const hasUnresolvedComments = commentData.count > 0;
+        const commentData = await fetchPRReviewComments(owner, repo, pr.number, token, host, authorLogin);
+        const unansweredCount = commentData.unansweredCount || 0;
+        const hasUnresolvedComments = unansweredCount > 0 || commentData.count > 0;
+        const hasUnansweredReviewComments = unansweredCount > 0;
 
         const commentAuthor = commentData.lastCommentAuthor || authorLogin || 'Author';
         const commentText =
@@ -244,7 +299,7 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '', host = 'gith
           repo: `${owner}/${repo}`,
           summary: pr.title,
           status: stateLabel,
-          priority: pr.draft ? 'Low' : hasUnresolvedComments ? 'High' : 'Medium',
+          priority: pr.draft ? 'Low' : hasUnansweredReviewComments ? 'High' : 'Medium',
           author: authorLogin,
           assignee: assigneesList.join(', ') || authorLogin || 'Unassigned',
           assigneeEmail: authorLogin,
@@ -252,7 +307,9 @@ async function fetchGitHubRepoPullRequests(owner, repo, token = '', host = 'gith
           url: pr.html_url || `${origin}/${owner}/${repo}/pull/${pr.number}`,
           linkedJiraKey,
           reviewCommentsCount: commentData.count,
+          unansweredReviewCommentsCount: unansweredCount,
           hasUnresolvedComments,
+          hasUnansweredReviewComments,
           lastCommentAuthor: commentAuthor,
           lastCommentText: commentText,
           lastCommentDate: commentData.lastCommentDate || updatedAt,

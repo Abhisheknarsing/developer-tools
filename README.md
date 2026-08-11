@@ -4,6 +4,7 @@ Chrome extension for developers who work across **Jira** and **GitHub**. One pop
 
 ## Features
 
+- **Quick Actions** (default tab) — My Items focus with Action Needed, In Progress, Open PR Comments, and Tester Comments
 - Jira board sync through your browser login (no Jira token)
 - **My Items** on Jira via assignee filter — exact email, display name, or logged-in `currentUser()`
 - GitHub PR tracking for public and private repos
@@ -11,7 +12,7 @@ Chrome extension for developers who work across **Jira** and **GitHub**. One pop
 - Private GitHub access using your browser session on that host (optional PAT fallback)
 - Stale / action-required alerts, comment snippets, kanban & list views, CSV export
 - Jira keys detected from PR title, body, or branch
-- Platform switcher when both Jira and GitHub are configured
+- Platform switcher: Quick Actions · Jira · GitHub
 
 ## Install
 
@@ -58,11 +59,20 @@ Stay logged into the **same** GitHub host in Chrome that you configured. A sessi
 
 ## Usage
 
-1. Open the popup — Jira and GitHub data load automatically when configured
-2. Switch **Jira** / **GitHub** tabs when both are set
-3. Filter with My Items, stale (>24h), comments, status, or search
+1. Open the popup — lands on **Quick Actions** by default
+2. Switch **Quick Actions** / **Jira** / **GitHub** as needed
+3. On Jira/GitHub: filter with My Items, stale (>24h), comments, status, or search
 4. Toggle board / list view, open items in a new tab, or export CSV
 5. Refresh to re-fetch
+
+### Quick Actions (My Items only)
+
+| Row | Meaning |
+|-----|---------|
+| Stats | Action Needed (>24h stale), In Progress, Open Comments (unanswered PR reviews on In Progress tickets), Tester Comments (Ready For Testing awaiting your reply) |
+| Action Needed | Your stale My Items tickets |
+| Open PR Comments | Linked GitHub PRs with unanswered review comments for In Progress tickets |
+| Tester Comments | Ready For Testing tickets whose latest comment is not from you |
 
 Toggling **My Items** on Jira re-fetches with an assignee JQL filter so results stay exact.
 

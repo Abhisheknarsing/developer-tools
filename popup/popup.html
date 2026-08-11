@@ -23,9 +23,10 @@
         </div>
       </div>
 
-      <!-- Segmented Platform Switcher (Jira vs GitHub) -->
+      <!-- Segmented Platform Switcher -->
       <div id="platformSwitch" class="platform-switch hidden">
-        <button id="jiraTabBtn" class="platform-btn active">Jira</button>
+        <button id="quickTabBtn" class="platform-btn active">Quick Actions</button>
+        <button id="jiraTabBtn" class="platform-btn">Jira</button>
         <button id="githubTabBtn" class="platform-btn">GitHub</button>
       </div>
 
@@ -42,7 +43,7 @@
       </div>
     </header>
 
-    <!-- Priority Goal Stats Header -->
+    <!-- Priority Goal Stats Header (Jira / GitHub) -->
     <section id="statsSection" class="stats-section hidden">
       <div class="stat-card total">
         <span class="stat-value" id="statTotal">0</span>
@@ -63,6 +64,55 @@
       <div class="stat-card action-needed">
         <span class="stat-value" id="statActionRequired">0</span>
         <span class="stat-label" id="labelActionNeeded">Action Needed</span>
+      </div>
+    </section>
+
+    <!-- Quick Actions View -->
+    <section id="quickActionsSection" class="quick-actions-section hidden">
+      <div class="qa-stats-row">
+        <div class="stat-card action-needed">
+          <span class="stat-value" id="qaStatActionNeeded">0</span>
+          <span class="stat-label">Action Needed</span>
+        </div>
+        <div class="stat-card in-progress">
+          <span class="stat-value" id="qaStatInProgress">0</span>
+          <span class="stat-label">In Progress</span>
+        </div>
+        <div class="stat-card todo">
+          <span class="stat-value" id="qaStatOpenComments">0</span>
+          <span class="stat-label">Open Comments</span>
+        </div>
+        <div class="stat-card done">
+          <span class="stat-value" id="qaStatTesterComments">0</span>
+          <span class="stat-label">Tester Comments</span>
+        </div>
+      </div>
+
+      <div class="qa-row">
+        <div class="qa-row-header">
+          <span class="qa-row-title">Action Needed</span>
+          <span class="qa-row-sub">>24h stale · My Items</span>
+          <span class="qa-row-count" id="qaStaleCount">0</span>
+        </div>
+        <div id="qaStaleList" class="qa-row-list"></div>
+      </div>
+
+      <div class="qa-row">
+        <div class="qa-row-header">
+          <span class="qa-row-title">Open PR Comments</span>
+          <span class="qa-row-sub">In Progress tickets · unanswered reviews</span>
+          <span class="qa-row-count" id="qaPrCommentsCount">0</span>
+        </div>
+        <div id="qaPrCommentsList" class="qa-row-list"></div>
+      </div>
+
+      <div class="qa-row">
+        <div class="qa-row-header">
+          <span class="qa-row-title">Tester Comments</span>
+          <span class="qa-row-sub">Ready For Testing · awaiting your reply</span>
+          <span class="qa-row-count" id="qaTesterCount">0</span>
+        </div>
+        <div id="qaTesterList" class="qa-row-list"></div>
       </div>
     </section>
 

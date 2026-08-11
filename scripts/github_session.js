@@ -329,11 +329,18 @@
     const linkedJiraKey = extractJiraTicketKey(pr.title, body, branchRef);
 
     const commentCount = (detail && detail.comments_count) || pr.comments_count || 0;
-    const hasUnresolvedComments = commentCount > 0;
     const commentAuthor = (detail && detail.lastCommentAuthor) || authorLogin || 'Author';
     const commentText =
       (detail && detail.lastCommentText) ||
       (body ? truncate(body) : 'Pull Request Open');
+    // Session scrape: unanswered if there are comments and latest author is not the PR author
+    const hasUnansweredReviewComments =
+      commentCount > 0 &&
+      !!commentAuthor &&
+      !!authorLogin &&
+      commentAuthor.toLowerCase() !== authorLogin.toLowerCase();
+    const unansweredReviewCommentsCount = hasUnansweredReviewComments ? Math.max(1, commentCount) : 0;
+    const hasUnresolvedComments = commentCount > 0;
 
     return {
       id: `pr-${host}-${owner}-${repo}-${pr.number}`,
@@ -341,7 +348,7 @@
       repo: `${owner}/${repo}`,
       summary: pr.title,
       status: stateLabel,
-      priority: pr.draft ? 'Low' : hasUnresolvedComments ? 'High' : 'Medium',
+      priority: pr.draft ? 'Low' : hasUnansweredReviewComments ? 'High' : 'Medium',
       author: authorLogin,
       assignee: assigneesList.join(', ') || authorLogin || 'Unassigned',
       assigneeEmail: authorLogin,
@@ -349,7 +356,9 @@
       url: pr.html_url || `${origin}/${owner}/${repo}/pull/${pr.number}`,
       linkedJiraKey,
       reviewCommentsCount: commentCount,
+      unansweredReviewCommentsCount,
       hasUnresolvedComments,
+      hasUnansweredReviewComments,
       lastCommentAuthor: commentAuthor,
       lastCommentText: commentText,
       lastCommentDate: (detail && detail.lastCommentDate) || updatedAt,
