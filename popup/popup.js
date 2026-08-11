@@ -314,21 +314,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
-  function createQaLinkItem({ key, meta, summary, comment, url }) {
+  function createQaLinkItem({ key, summary, url }) {
     const el = document.createElement(url ? 'a' : 'div');
     el.className = 'qa-item';
     if (url) {
       el.href = url;
       el.target = '_blank';
       el.rel = 'noopener noreferrer';
+      el.title = `${key || ''} — ${summary || ''}`.trim();
     }
     el.innerHTML = `
-      <div class="qa-item-top">
-        <span class="qa-item-key">${escapeHtml(key || '')}</span>
-        <span class="qa-item-meta">${escapeHtml(meta || '')}</span>
-      </div>
+      <span class="qa-item-key">${escapeHtml(key || '')}</span>
       <div class="qa-item-summary">${escapeHtml(summary || '')}</div>
-      ${comment ? `<div class="qa-item-comment">${escapeHtml(comment)}</div>` : ''}
     `;
     if (url) {
       el.addEventListener('click', (e) => {
@@ -376,11 +373,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       (t) =>
         createQaLinkItem({
           key: t.key,
-          meta: `${t.status || ''} · ${t.hoursSinceUpdate || 24}h`,
           summary: t.summary,
-          comment: t.lastCommentText
-            ? `${t.lastCommentAuthor || 'User'}: ${t.lastCommentText}`
-            : '',
           url: t.url
         })
     );
@@ -391,12 +384,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       'No unanswered PR review comments on In Progress tickets.',
       (pr) =>
         createQaLinkItem({
-          key: `${pr.linkedTicketKey || ''} ${pr.key || ''}`.trim(),
-          meta: pr.repo || '',
-          summary: pr.summary,
-          comment: pr.lastCommentText
-            ? `${pr.lastCommentAuthor || 'Reviewer'}: ${pr.lastCommentText}`
-            : 'Unanswered review comments',
+          key: pr.linkedTicketKey || pr.key,
+          summary: pr.linkedTicketSummary || pr.summary,
           url: pr.url
         })
     );
@@ -408,11 +397,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       (t) =>
         createQaLinkItem({
           key: t.key,
-          meta: t.status || 'Ready For Testing',
           summary: t.summary,
-          comment: t.lastCommentText
-            ? `${t.lastCommentAuthor || 'Tester'}: ${t.lastCommentText}`
-            : '',
           url: t.url
         })
     );
